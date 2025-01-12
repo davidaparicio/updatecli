@@ -11,7 +11,7 @@ import (
 
 // Source retrieves Docker image tag digest from a registry
 func (ds *DockerDigest) Source(workingDir string, resultSource *result.Source) error {
-	refTag := ""
+	refTag := "latest"
 	refName := ds.spec.Image
 
 	if ds.spec.Tag != "" {
@@ -30,14 +30,22 @@ func (ds *DockerDigest) Source(workingDir string, resultSource *result.Source) e
 		return fmt.Errorf("invalid image %s: %w", refName, err)
 	}
 
-	image, err := remote.Image(ref, ds.options...)
+	remoteDescriptor, err := remote.Get(ref, ds.options...)
 	if err != nil {
 		return fmt.Errorf("unable to retrieve image %s: %w", refName, err)
 	}
 
-	digest, err := image.Digest()
-	if err != nil {
-		return fmt.Errorf("unable to retrieve image digest %s: %w", refName, err)
+	digest := remoteDescriptor.Digest
+	if ds.spec.Architecture != "" {
+		image, err := remote.Image(ref, ds.options...)
+		if err != nil {
+			return fmt.Errorf("unable to retrieve image %s: %w", refName, err)
+		}
+
+		digest, err = image.Digest()
+		if err != nil {
+			return fmt.Errorf("unable to retrieve image digest %s: %w", refName, err)
+		}
 	}
 
 	finalDigest := refTag + "@" + digest.String()

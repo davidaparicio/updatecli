@@ -14,15 +14,16 @@ import (
 	oras "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
 
 	"github.com/stretchr/testify/require"
 )
 
 // TestPushPull is a test for the Push and Pull functions
 func TestPushPullPolicy(t *testing.T) {
-	//if testing.Short() {
-	//	t.Skip("skipping integration test")
-	//}
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	ctx := context.Background()
 	req := testcontainers.ContainerRequest{
@@ -58,6 +59,7 @@ func TestPushPullPolicy(t *testing.T) {
 		expectedPullValuesFiles   []string
 		expectedPullSecretsFiles  []string
 		disableTLS                bool
+		overwrite                 bool
 	}{
 		{
 			name:                      "Validate that we can push and pull a policy using the latest tag, even thought the tag is ignored",
@@ -108,7 +110,19 @@ func TestPushPullPolicy(t *testing.T) {
 				data.toPushSecretFiles,
 				data.toPushPolicyName,
 				data.disableTLS,
-				data.toPushFileStore)
+				data.toPushFileStore,
+				data.overwrite)
+			require.NoError(t, err)
+
+			err = Push(
+				data.toPushPolicyFile,
+				data.toPushManifestFiles,
+				data.toPushValueFiles,
+				data.toPushSecretFiles,
+				data.toPushPolicyName,
+				data.disableTLS,
+				data.toPushFileStore,
+				data.overwrite)
 			require.NoError(t, err)
 
 			gotManifests, gotValues, gotSecrets, err := Pull(
@@ -154,6 +168,8 @@ func sanitizeDirPath(policyRef string, disableTLS bool, manifestFiles, valuesFil
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("new repository: %w", err)
 	}
+
+	ctx = auth.AppendRepositoryScope(ctx, repo.Reference, auth.ActionPull, auth.ActionPush)
 
 	if disableTLS {
 		repo.PlainHTTP = true

@@ -108,7 +108,8 @@ func TestSourceResult(t *testing.T) {
 		},
 	}
 
-	for _, d := range dataset {
+	for i := range dataset {
+		d := dataset[i]
 		t.Run(d.name, func(t *testing.T) {
 			c, gotErr := New(d.spec, &d.exitCode, &d.stdout)
 
@@ -206,7 +207,8 @@ func TestConditionResult(t *testing.T) {
 		},
 	}
 
-	for _, d := range dataset {
+	for i := range dataset {
+		d := dataset[i]
 		t.Run(d.name, func(t *testing.T) {
 			c, gotErr := New(d.spec, &d.exitCode, &d.stdout)
 
@@ -245,21 +247,9 @@ func TestTargetResult(t *testing.T) {
 		expectedNewErrorMessage    error
 	}{
 		{
-			name:                 "Test succeeded with no command output",
+			name:                 "Test succeeded exit code 0",
 			exitCode:             0,
-			stdout:               "",
-			expectedResultOutput: true,
-			spec: Spec{
-				Warning: 2,
-				Success: 0,
-				Failure: 1,
-			},
-		},
-		{
-			name:                 "Test succeeded with command output",
-			exitCode:             0,
-			stdout:               "1.2.3",
-			expectedResultOutput: true,
+			expectedResultOutput: false,
 			spec: Spec{
 				Warning: 2,
 				Success: 0,
@@ -269,8 +259,7 @@ func TestTargetResult(t *testing.T) {
 		{
 			name:                 "Triggered changed with command output",
 			exitCode:             2,
-			stdout:               "1.2.3",
-			expectedResultOutput: false,
+			expectedResultOutput: true,
 			spec: Spec{
 				Warning: 2,
 				Success: 0,
@@ -280,7 +269,6 @@ func TestTargetResult(t *testing.T) {
 		{
 			name:                       "Test failed with no command output",
 			exitCode:                   1,
-			stdout:                     "",
 			expectedResultOutput:       false,
 			expectedResultErrorMessage: errors.New("shell command failed. Expected exit code 0 but got 1"),
 			expectedError:              true,
@@ -305,7 +293,8 @@ func TestTargetResult(t *testing.T) {
 		},
 	}
 
-	for _, d := range dataset {
+	for i := range dataset {
+		d := dataset[i]
 		t.Run(d.name, func(t *testing.T) {
 			c, gotErr := New(d.spec, &d.exitCode, &d.stdout)
 

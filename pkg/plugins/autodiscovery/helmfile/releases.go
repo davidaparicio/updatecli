@@ -3,6 +3,7 @@ package helmfile
 import (
 	"bytes"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -44,8 +45,15 @@ func (h Helmfile) discoverHelmfileReleaseManifests() ([][]byte, error) {
 
 	var manifests [][]byte
 
+	searchFromDir := h.rootDir
+	// If the spec.RootDir is an absolute path, then it as already been set
+	// correctly in the New function.
+	if h.spec.RootDir != "" && !path.IsAbs(h.spec.RootDir) {
+		searchFromDir = filepath.Join(h.rootDir, h.spec.RootDir)
+	}
+
 	foundHelmfileFiles, err := searchHelmfileFiles(
-		h.rootDir,
+		searchFromDir,
 		DefaultFilePattern[:])
 
 	if err != nil {
@@ -64,22 +72,6 @@ func (h Helmfile) discoverHelmfileReleaseManifests() ([][]byte, error) {
 
 		helmfileRelativeMetadataPath := filepath.Dir(relativeFoundChartFile)
 		helmfileFilename := filepath.Base(helmfileRelativeMetadataPath)
-
-		// Test if the ignore rule based on path doesn't match
-		if len(h.spec.Ignore) > 0 && h.spec.Ignore.isMatchingIgnoreRule(h.rootDir, relativeFoundChartFile) {
-			logrus.Debugf("Ignoring Helmfile %q from %q, as not matching rule(s)\n",
-				helmfileFilename,
-				helmfileRelativeMetadataPath)
-			continue
-		}
-
-		// Test if the only rule based on path doesn't match
-		if len(h.spec.Only) > 0 && !h.spec.Only.isMatchingOnlyRule(h.rootDir, relativeFoundChartFile) {
-			logrus.Debugf("Ignoring Helmfile %q from %q, as not matching rule(s)\n",
-				helmfileFilename,
-				helmfileRelativeMetadataPath)
-			continue
-		}
 
 		// Retrieve chart dependencies for each chart
 
@@ -156,6 +148,20 @@ func (h Helmfile) discoverHelmfileReleaseManifests() ([][]byte, error) {
 				if err != nil {
 					logrus.Debugf("building version filter pattern: %s", err)
 					sourceVersionFilterPattern = "*"
+				}
+			}
+
+			if len(h.spec.Ignore) > 0 {
+				if h.spec.Ignore.isMatchingRules(h.rootDir, relativeFoundChartFile, chartURL, chartName, release.Version) {
+					logrus.Debugf("Ignoring Helmfile release %q from %q, as matching ignore rule(s)\n", chartURL, helmfileFilename)
+					continue
+				}
+			}
+
+			if len(h.spec.Only) > 0 {
+				if !h.spec.Only.isMatchingRules(h.rootDir, relativeFoundChartFile, chartURL, chartName, release.Version) {
+					logrus.Debugf("Ignoring Helmfile release %q from %q, as not matching only rule(s)\n", chartURL, helmfileFilename)
+					continue
 				}
 			}
 

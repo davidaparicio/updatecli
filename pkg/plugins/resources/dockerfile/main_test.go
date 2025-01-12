@@ -18,20 +18,39 @@ func TestDockerfile_New(t *testing.T) {
 		spec       Spec
 		wantParser types.DockerfileParser
 		wantErr    error
+		wantFiles  []string
 	}{
 		{
-			name: "Simple Text Parser with strong typing",
+			name: "Simple Text Parser with strong typing and single file",
 			spec: Spec{
 				Instruction: map[string]string{
 					"keyword": "ARG",
 					"matcher": "foo",
 				},
+				File: "Dockerfile",
 			},
 			wantParser: simpletextparser.SimpleTextDockerfileParser{
 				Keyword:      "ARG",
 				Matcher:      "foo",
-				KeywordLogic: keywords.Arg{},
+				KeywordLogic: keywords.SimpleKeyword{Keyword: "arg"},
 			},
+			wantFiles: []string{"Dockerfile"},
+		},
+		{
+			name: "Simple Text Parser with strong typing and multiple files",
+			spec: Spec{
+				Instruction: map[string]string{
+					"keyword": "ARG",
+					"matcher": "foo",
+				},
+				Files: []string{"Dockerfile.alpine", "Dockerfile.windows"},
+			},
+			wantParser: simpletextparser.SimpleTextDockerfileParser{
+				Keyword:      "ARG",
+				Matcher:      "foo",
+				KeywordLogic: keywords.SimpleKeyword{Keyword: "arg"},
+			},
+			wantFiles: []string{"Dockerfile.alpine", "Dockerfile.windows"},
 		},
 		{
 			name: "Simple Text Parser with weak typing",
@@ -75,6 +94,18 @@ func TestDockerfile_New(t *testing.T) {
 			},
 			wantErr: fmt.Errorf("parsing error: cannot determine instruction: map[keyword:ARG matcher:123]"),
 		},
+		{
+			name: "Spec File and Files are mutually exclusive",
+			spec: Spec{
+				Instruction: map[string]string{
+					"keyword": "ARG",
+					"matcher": "foo",
+				},
+				File:  "Dockerfile",
+				Files: []string{"foo", "bar"},
+			},
+			wantErr: fmt.Errorf("parsing error: spec.file and spec.files are mutually exclusive"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,13 +118,14 @@ func TestDockerfile_New(t *testing.T) {
 
 			require.NoError(t, gotErr)
 			assert.Equal(t, tt.wantParser, gotResource.parser)
-
+			assert.Equal(t, tt.wantFiles, gotResource.files)
 		})
 	}
 }
 
 const dockerfileFixture = `FROM golang:1.15 AS builder
 ARG golang=3.0.0
+LABEL org.opencontainers.image.version=1.0.0
 COPY ./golang .
 RUN go get -d -v ./... && echo golang
 FROM golang

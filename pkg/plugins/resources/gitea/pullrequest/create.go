@@ -12,12 +12,13 @@ import (
 )
 
 // CreateAction opens a Pull Request on the Gitea server
-func (g *Gitea) CreateAction(report reports.Action) error {
+func (g *Gitea) CreateAction(report *reports.Action, resetDescription bool) error {
 
 	title := report.Title
 
 	// One Gitea pullrequest body can contain multiple action report
-	// It would be better to refactor CreateAction
+	// It would be better to refactor CreateAction to be able to reuse existing pullrequest description.
+	// similar to what we did for github pullrequest.
 	body, err := utils.GeneratePullRequestBody("", report.ToActionsString())
 
 	if err != nil {
@@ -33,12 +34,18 @@ func (g *Gitea) CreateAction(report reports.Action) error {
 	}
 
 	// Check if a pull-request is already opened then exit early if it does.
-	exist, err := g.isPullRequestExist()
+	pullrequestTitle, pullrequestDescription, pullrequestLink, err := g.isPullRequestExist()
 	if err != nil {
 		return err
 	}
 
-	if exist {
+	// If a pullrequest already exist, we update the report with the existing pullrequest
+	if pullrequestLink != "" {
+		logrus.Debugf("Gitea pullrequest already exist, nothing to do")
+
+		report.Title = pullrequestTitle
+		report.Link = pullrequestLink
+		report.Description = pullrequestDescription
 		return nil
 	}
 
@@ -100,6 +107,10 @@ func (g *Gitea) CreateAction(report reports.Action) error {
 		}
 		return err
 	}
+
+	report.Title = pr.Title
+	report.Description = pr.Body
+	report.Link = pr.Link
 
 	logrus.Infof("Gitea pullrequest successfully opened on %q", pr.Link)
 

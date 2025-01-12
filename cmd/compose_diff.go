@@ -14,12 +14,6 @@ var (
 		Short: "diff show changes defined by the compose file",
 		Run: func(cmd *cobra.Command, args []string) {
 
-			// TODO: To be removed once not experimental anymore
-			if !experimental {
-				logrus.Warningf("The 'compose' subcommand requires the flag experimental to work, such as:\n\t`updatecli compose diff --experimental`")
-				os.Exit(1)
-			}
-
 			c, err := compose.New(composeCmdFile)
 			if err != nil {
 				logrus.Errorf("command failed: %s", err)
@@ -49,7 +43,7 @@ var (
 )
 
 func init() {
-	composeDiffCmd.Flags().StringVarP(&composeCmdFile, "file", "f", "update-compose.yaml", "Define the update-compose file")
+	composeDiffCmd.Flags().StringVarP(&composeCmdFile, "file", "f", composeDefaultCmdFile, "Define the Updatecli compose file name")
 	composeDiffCmd.Flags().BoolVar(&composeCmdClean, "clean", false, "Remove updatecli working directory like '--clean=true'")
 	composeDiffCmd.Flags().BoolVar(&disableTLS, "disable-tls", false, "Disable TLS verification like '--disable-tls=true'")
 

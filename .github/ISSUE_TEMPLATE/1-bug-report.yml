@@ -38,11 +38,24 @@ body:
     description: |
       examples:
         - **OS**: Ubuntu 20.04
-        - **updatecli**: v0.64.1
+        - **updatecli**: v0.92.0
     value: |
         - OS:
         - updatecli:
     render: markdown
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: Pipeline Graph
+    description: |
+      Graph output of your pipeline, can be obtained with
+      ```bash
+      updatecli manifest show --graph --graph-flavor mermaid --experimental --config <your-pipeline.yaml>
+      ```
+    value: |
+      ```mermaid
+      ```
   validations:
     required: false
 - type: textarea

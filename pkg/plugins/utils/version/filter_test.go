@@ -142,6 +142,84 @@ func TestSearch(t *testing.T) {
 			want:     Version{},
 			wantErr:  &ErrNoVersionFoundForPattern{Pattern: "^updatecli-4.(\\d*)$"},
 		},
+		{
+			name: "Passing case with regex/semver",
+			filter: Filter{
+				Kind:  REGEXSEMVERVERSIONKIND,
+				Regex: "^updatecli-(\\d*\\.\\d*\\.\\d*)$",
+			},
+			versions: []string{"updatecli-1.0.0", "updatecli-2.0.0", "updatecli-1.1.0"},
+			want: Version{
+				ParsedVersion:   "2.0.0",
+				OriginalVersion: "updatecli-2.0.0",
+			},
+		},
+		{
+			name: "Passing case with regex/semver",
+			filter: Filter{
+				Kind:  REGEXSEMVERVERSIONKIND,
+				Regex: "^updatecli-\\d*\\.\\d*\\.\\d*$",
+			},
+			versions: []string{"updatecli-1.0.0", "updatecli-2.0.0", "updatecli-1.1.0"},
+			want:     Version{},
+			wantErr:  errors.New("versions list empty"),
+		},
+		{
+			name: "Empty case with regex/semver",
+			filter: Filter{
+				Kind: REGEXSEMVERVERSIONKIND,
+			},
+			versions: []string{"updatecli-1.0.0", "updatecli-2.0.0", "updatecli-1.1.0"},
+			want:     Version{},
+			wantErr:  errors.New("versions list empty"),
+		},
+		{
+			name: "Passing case with regex/time",
+			filter: Filter{
+				Kind:    REGEXTIMEVERSIONKIND,
+				Regex:   `^updatecli-(\d*)$`,
+				Pattern: "20060201",
+			},
+			versions: []string{"updatecli-20232103", "updatecli-20232205", "updatecli-20200101"},
+			want: Version{
+				ParsedVersion:   "updatecli-20232205",
+				OriginalVersion: "updatecli-20232205",
+			},
+		},
+		{
+			name: "Passing case with time",
+			filter: Filter{
+				Kind:    TIMEVERSIONKIND,
+				Pattern: "20060201",
+			},
+			versions: []string{"20232103", "20232205", "20200101"},
+			want: Version{
+				ParsedVersion:   "20232205",
+				OriginalVersion: "20232205",
+			},
+		},
+		{
+			name: "Passing case with lex",
+			filter: Filter{
+				Kind: LEXVERSIONKIND,
+			},
+			versions: []string{"main-20241226-57-2242a78", "main-20240910-43-3705031", "main-20240916-49-bc46fdf"},
+			want: Version{
+				ParsedVersion:   "main-20241226-57-2242a78",
+				OriginalVersion: "main-20241226-57-2242a78",
+			},
+		},
+		{
+			name: "Passing case with lex",
+			filter: Filter{
+				Kind: LEXVERSIONKIND,
+			},
+			versions: []string{"v1.1", "v1.10", "v1.2"},
+			want: Version{
+				ParsedVersion:   "v1.2",
+				OriginalVersion: "v1.2",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -350,6 +428,14 @@ func TestGreaterThanPattern(t *testing.T) {
 				Pattern: "patch",
 			},
 			version: "3.0", want: "3.0.x",
+		},
+		{
+			name: "Prerelease semver pattern",
+			filter: Filter{
+				Kind:    SEMVERVERSIONKIND,
+				Pattern: "prerelease",
+			},
+			version: "3.0", want: ">=3.0.0-0 <= 3.0.0",
 		},
 		{
 			name: "Version constraint semver pattern",

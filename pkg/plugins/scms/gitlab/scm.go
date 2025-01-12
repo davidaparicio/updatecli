@@ -14,8 +14,8 @@ func (g *Gitlab) GetBranches() (sourceBranch, workingBranch, targetBranch string
 	workingBranch = g.Spec.Branch
 	targetBranch = g.Spec.Branch
 
-	if len(g.pipelineID) > 0 {
-		workingBranch = g.nativeGitHandler.SanitizeBranchName(fmt.Sprintf("updatecli_%v", g.pipelineID))
+	if len(g.pipelineID) > 0 && g.workingBranch {
+		workingBranch = g.nativeGitHandler.SanitizeBranchName(fmt.Sprintf("updatecli_%s_%s", targetBranch, g.pipelineID))
 	}
 
 	return sourceBranch, workingBranch, targetBranch
@@ -56,27 +56,12 @@ func (g *Gitlab) Clone() (string, error) {
 		g.Spec.Username,
 		g.Spec.Token,
 		g.GetURL(),
-		g.GetDirectory())
+		g.GetDirectory(),
+		g.Spec.Submodules,
+	)
 
 	if err != nil {
 		logrus.Errorf("failed cloning GitLab repository %q", g.GetURL())
-		return "", err
-	}
-
-	sourceBranch, workingBranch, _ := g.GetBranches()
-
-	if len(workingBranch) > 0 && len(g.GetDirectory()) > 0 {
-		err = g.nativeGitHandler.Checkout(
-			g.Spec.Username,
-			g.Spec.Token,
-			sourceBranch,
-			workingBranch,
-			g.GetDirectory(),
-			true)
-	}
-
-	if err != nil {
-		logrus.Errorf("initial GitLab checkout failed for repository %q", g.GetURL())
 		return "", err
 	}
 
@@ -92,7 +77,14 @@ func (g *Gitlab) Commit(message string) error {
 		return err
 	}
 
-	err = g.nativeGitHandler.Commit(g.Spec.User, g.Spec.Email, commitMessage, g.GetDirectory(), g.Spec.GPG.SigningKey, g.Spec.GPG.Passphrase)
+	err = g.nativeGitHandler.Commit(
+		g.Spec.User,
+		g.Spec.Email,
+		commitMessage,
+		g.GetDirectory(),
+		g.Spec.GPG.SigningKey,
+		g.Spec.GPG.Passphrase,
+	)
 	if err != nil {
 		return err
 	}
@@ -109,7 +101,8 @@ func (g *Gitlab) Checkout() error {
 		sourceBranch,
 		workingBranch,
 		g.Spec.Directory,
-		false)
+		g.force,
+	)
 	if err != nil {
 		return err
 	}
@@ -140,20 +133,26 @@ func (g *Gitlab) IsRemoteBranchUpToDate() (bool, error) {
 }
 
 // Push run `git push` to the corresponding GitLab remote branch if not already created.
-func (g *Gitlab) Push() error {
+func (g *Gitlab) Push() (bool, error) {
 
-	err := g.nativeGitHandler.Push(g.Spec.Username, g.Spec.Token, g.GetDirectory(), g.Spec.Force)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return g.nativeGitHandler.Push(
+		g.Spec.Username,
+		g.Spec.Token,
+		g.GetDirectory(),
+		g.force,
+	)
 }
 
 // PushTag push tags
 func (g *Gitlab) PushTag(tag string) error {
 
-	err := g.nativeGitHandler.PushTag(tag, g.Spec.Username, g.Spec.Token, g.GetDirectory(), g.Spec.Force)
+	err := g.nativeGitHandler.PushTag(
+		tag,
+		g.Spec.Username,
+		g.Spec.Token,
+		g.GetDirectory(),
+		g.force,
+	)
 	if err != nil {
 		return err
 	}
@@ -169,7 +168,7 @@ func (g *Gitlab) PushBranch(branch string) error {
 		g.Spec.Username,
 		g.Spec.Token,
 		g.GetDirectory(),
-		g.Spec.Force)
+		g.force)
 	if err != nil {
 		return err
 	}

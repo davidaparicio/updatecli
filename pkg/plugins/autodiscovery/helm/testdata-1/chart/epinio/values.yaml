@@ -1,0 +1,7 @@
+image:
+  repository: splatform/epinio-server
+  tag: 2.0.0
+images:
+  ui:
+    repository: epinioteam/epinio-ui-qa
+    tag: 1.0.0

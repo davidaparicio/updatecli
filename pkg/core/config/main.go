@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
+	"github.com/updatecli/updatecli/pkg/core/cmdoptions"
 	"github.com/updatecli/updatecli/pkg/core/pipeline/action"
 	"github.com/updatecli/updatecli/pkg/core/pipeline/autodiscovery"
 	"github.com/updatecli/updatecli/pkg/core/pipeline/condition"
@@ -234,6 +235,23 @@ func New(option Option) (configs []Config, err error) {
 
 	specs := []Spec{}
 
+	switch extension := filepath.Ext(basename); extension {
+	case ".tpl", ".tmpl", ".yaml", ".yml", ".json":
+		//
+	case ".cue":
+		if !cmdoptions.Experimental {
+			return configs, fmt.Errorf("cuelang support is experimental, please use '--experimental' flag to enable it")
+		}
+		rawManifestContent, err = readCueConfig(rawManifestContent)
+		if err != nil {
+			return configs, err
+		}
+
+	default:
+		logrus.Debugf("file extension '%s' not supported for file '%s'", extension, option.ManifestFile)
+		return configs, ErrConfigFileTypeNotSupported
+	}
+
 	if !option.DisableTemplating {
 		// Try to template manifest no matter the extension
 		// templated manifest must respect its extension before and after templating
@@ -268,17 +286,9 @@ func New(option Option) (configs []Config, err error) {
 		}
 	}
 
-	switch extension := filepath.Ext(basename); extension {
-	case ".tpl", ".tmpl", ".yaml", ".yml", ".json":
-
-		err = unmarshalConfigSpec(templatedManifestContent, &specs)
-		if err != nil {
-			return configs, err
-		}
-
-	default:
-		logrus.Debugf("file extension '%s' not supported for file '%s'", extension, option.ManifestFile)
-		return configs, ErrConfigFileTypeNotSupported
+	err = unmarshalConfigSpec(templatedManifestContent, &specs)
+	if err != nil {
+		return configs, err
 	}
 
 	configs = make([]Config, len(specs))
@@ -312,7 +322,6 @@ func New(option Option) (configs []Config, err error) {
 
 		// Ensure there is a local SCM defined as specified
 		if err = configs[id].EnsureLocalScm(); err != nil {
-			logrus.Errorf("Skipping manifest in position %q from %q: %s", id, option.ManifestFile, err.Error())
 			continue
 		}
 
@@ -321,7 +330,7 @@ func New(option Option) (configs []Config, err error) {
 		if len(configs[id].Spec.PullRequests) > 0 {
 			if len(configs[id].Spec.Actions) > 0 {
 				err := fmt.Errorf("the `pullrequests` and `actions` keywords are mutually exclusive. Please use only `actions` as `pullrequests` is deprecated")
-				logrus.Errorf("Skipping manifest in position %q from %q: %s", id, option.ManifestFile, err.Error())
+				logrus.Errorf("Skipping manifest %q:\n\t%s", option.ManifestFile, err.Error())
 				continue
 			}
 
@@ -333,7 +342,6 @@ func New(option Option) (configs []Config, err error) {
 
 		err = configs[id].Validate()
 		if err != nil {
-			logrus.Errorf("Skipping manifest in position %q from %q: %s", id, option.ManifestFile, err.Error())
 			continue
 		}
 
@@ -343,7 +351,6 @@ func New(option Option) (configs []Config, err error) {
 
 		err = configs[id].Validate()
 		if err != nil {
-			logrus.Errorf("Skipping manifest in position %q from %q: %s", id, option.ManifestFile, err.Error())
 			continue
 		}
 	}
@@ -527,6 +534,23 @@ func (config *Config) validateTargets() error {
 				logrus.Errorf("the specified sourceid %q for condition[id] does not exist", t.SourceID)
 				return ErrBadConfig
 			}
+		}
+
+		if t.DisableConditions && len(t.DeprecatedConditionIDs) > 0 {
+			logrus.Errorf("target %q has 'disableconditions' set to true and 'conditionids' defined (%v), it's not possible to disable conditions and define conditions at the same time", id, t.DeprecatedConditionIDs)
+			return ErrBadConfig
+		}
+
+		undefinedConditions := []string{}
+		for _, conditionID := range t.DeprecatedConditionIDs {
+			if _, ok := config.Spec.Conditions[conditionID]; !ok {
+				undefinedConditions = append(undefinedConditions, conditionID)
+			}
+		}
+
+		if len(undefinedConditions) > 0 {
+			logrus.Errorf("target %q has undefined conditionids: %v", id, undefinedConditions)
+			return ErrBadConfig
 		}
 
 		// Only check/guess the sourceID if the user did not disable it (default is enabled)

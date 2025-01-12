@@ -2,7 +2,7 @@ package mavenmetadata
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/updatecli/updatecli/pkg/core/httpclient"
+	"github.com/updatecli/updatecli/pkg/core/text"
 	"github.com/updatecli/updatecli/pkg/plugins/utils/version"
 )
 
@@ -34,6 +35,30 @@ const wikitextCoreMavenMetadata = `<?xml version="1.0" encoding="UTF-8"?>
   </versioning>
 </metadata>
 `
+
+const gradleLombokPluginMetadata = `<?xml version='1.0' encoding='US-ASCII'?>
+<metadata>
+  <groupId>io.freefair.gradle</groupId>
+  <artifactId>lombok-plugin</artifactId>
+  <version>8.6</version>
+  <versioning>
+    <latest>8.6</latest>
+    <release>8.6</release>
+    <versions>
+      <version>8.0.1</version>
+      <version>8.1.0</version>
+      <version>8.2.0</version>
+      <version>8.2.1</version>
+      <version>8.2.2</version>
+      <version>8.3</version>
+      <version>8.4</version>
+      <version>8.6</version>
+    </versions>
+    <lastUpdated>20240215231139</lastUpdated>
+  </versioning>
+</metadata>`
+
+const invalidXMLEncoding = `<?xml version='1.0' encoding='SOMETHING'?>`
 
 const invalidXML = `<?xml version="1.0" encoding="UTF-8"?>
 <metadata>
@@ -61,10 +86,10 @@ func TestNew(t *testing.T) {
 			repositoryURL: "https://somewhere",
 			want: &DefaultHandler{
 				metadataURL: "https://somewhere",
-				webClient:   http.DefaultClient,
 				versionFilter: version.Filter{
 					Kind: "latest",
 				},
+				contentRetriever: &text.Text{},
 			},
 		},
 	}
@@ -92,6 +117,13 @@ func TestDefaultHandler_GetLatestVersion(t *testing.T) {
 			mockedHTTPStatusCode: 200,
 			mockedHttpBody:       wikitextCoreMavenMetadata,
 			want:                 "1.7.4.v20130429",
+		},
+		{
+			name:                 "Normal case, with US-ASCII encoding io.freefair.gradle:lombok-plugin on plugins.gradle.org/m2",
+			metadataURL:          "https://plugins.gradle.org/m2/io/freefair/gradle/lombok-plugin/maven-metadata.xml",
+			mockedHTTPStatusCode: 200,
+			mockedHttpBody:       gradleLombokPluginMetadata,
+			want:                 "8.6",
 		},
 		{
 			name: "Normal case with org.eclipse.mylyn.wikitext.wikitext.core on repo.jenkins-ci.org/releases using semver filter",
@@ -133,24 +165,28 @@ func TestDefaultHandler_GetLatestVersion(t *testing.T) {
 			mockedHttpBody:       noLatestVersionMavenMetadata,
 			wantErr:              true,
 		},
+		{
+			name:                 "Case with invalid XML encoding",
+			metadataURL:          "https://repo.jenkins-ci.org/releases/org/eclipse/mylyn/wikitext/wikitext.core/maven-metadata.xml",
+			mockedHTTPStatusCode: 200,
+			mockedHttpBody:       invalidXMLEncoding,
+			wantErr:              true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sut := DefaultHandler{
-				metadataURL:   tt.metadataURL,
-				versionFilter: tt.versionFilter,
-				webClient: &httpclient.MockClient{
-					DoFunc: func(req *http.Request) (*http.Response, error) {
-						body := tt.mockedHttpBody
-						statusCode := tt.mockedHTTPStatusCode
-						return &http.Response{
-							StatusCode: statusCode,
-							Body:       ioutil.NopCloser(strings.NewReader(body)),
-						}, tt.mockedHttpError
-					},
-				},
-			}
+			sut := New(tt.metadataURL, tt.versionFilter)
 
+			sut.contentRetriever.SetHttpClient(&httpclient.MockClient{
+				DoFunc: func(req *http.Request) (*http.Response, error) {
+					body := tt.mockedHttpBody
+					statusCode := tt.mockedHTTPStatusCode
+					return &http.Response{
+						StatusCode: statusCode,
+						Body:       io.NopCloser(strings.NewReader(body)),
+					}, tt.mockedHttpError
+				},
+			})
 			got, err := sut.GetLatestVersion()
 
 			if tt.wantErr {
@@ -191,20 +227,17 @@ func TestDefaultHandler_GetVersions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sut := DefaultHandler{
-				metadataURL:   tt.metadataURL,
-				versionFilter: version.Filter{},
-				webClient: &httpclient.MockClient{
-					DoFunc: func(req *http.Request) (*http.Response, error) {
-						body := tt.mockedHttpBody
-						statusCode := tt.mockedHTTPStatusCode
-						return &http.Response{
-							StatusCode: statusCode,
-							Body:       ioutil.NopCloser(strings.NewReader(body)),
-						}, tt.mockedHttpError
-					},
+			sut := New(tt.metadataURL, version.Filter{})
+			sut.contentRetriever.SetHttpClient(&httpclient.MockClient{
+				DoFunc: func(req *http.Request) (*http.Response, error) {
+					body := tt.mockedHttpBody
+					statusCode := tt.mockedHTTPStatusCode
+					return &http.Response{
+						StatusCode: statusCode,
+						Body:       io.NopCloser(strings.NewReader(body)),
+					}, tt.mockedHttpError
 				},
-			}
+			})
 
 			got, err := sut.GetVersions()
 

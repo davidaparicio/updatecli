@@ -2,6 +2,8 @@ package reports
 
 import (
 	"bytes"
+	"slices"
+	"sort"
 	"text/template"
 
 	"github.com/sirupsen/logrus"
@@ -12,7 +14,7 @@ import (
 const reportsTpl string = `
 =============================
 
-REPORTS:
+SUMMARY:
 
 
 {{ range . }}
@@ -71,8 +73,34 @@ func (r *Reports) Show() error {
 	return nil
 }
 
+// Sort reports by result in the following order
+// SUCCESS > SKIPPED > ATTENTION > FAILURE > UNKNOWN
+func (r *Reports) Sort() {
+	reports := *r
+
+	sort.SliceStable(reports, func(i, j int) bool {
+		resultToInteger := func(state string) int {
+			switch state {
+			case result.SUCCESS:
+				return 0
+			case result.SKIPPED:
+				return 1
+			case result.ATTENTION:
+				return 2
+			case result.FAILURE:
+				return 3
+			default:
+				return 4
+			}
+		}
+
+		return resultToInteger(reports[i].Result) < resultToInteger(reports[j].Result)
+	})
+
+}
+
 // Summary display a summary of
-func (r *Reports) Summary() (successCounter, changedCounter, failedCounter, skippedCounter int) {
+func (r *Reports) Summary() (successCounter, changedCounter, failedCounter, skippedCounter int, actionLinks []string) {
 
 	reports := *r
 
@@ -94,7 +122,13 @@ func (r *Reports) Summary() (successCounter, changedCounter, failedCounter, skip
 		default:
 			logrus.Infof("Unknown report result %q with named %q.", report.Result, report.Name)
 		}
+
+		for _, action := range report.Actions {
+			if !slices.Contains(actionLinks, action.Link) && action.Link != "" {
+				actionLinks = append(actionLinks, action.Link)
+			}
+		}
 	}
 
-	return successCounter, changedCounter, failedCounter, skippedCounter
+	return successCounter, changedCounter, failedCounter, skippedCounter, actionLinks
 }

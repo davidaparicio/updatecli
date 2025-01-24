@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"github.com/hexops/gotextdiff/myers"
 	"github.com/hexops/gotextdiff/span"
 	"github.com/sirupsen/logrus"
+	"github.com/updatecli/updatecli/pkg/core/httpclient"
+	"github.com/updatecli/updatecli/pkg/plugins/utils/redact"
 )
 
 type TextRetriever interface {
@@ -23,33 +24,39 @@ type TextRetriever interface {
 	WriteToFile(content string, location string) error
 	WriteLineToFile(lineContent, location string, lineNumber int) error
 	FileExists(location string) bool
+	SetHttpClient(client httpclient.HTTPClient)
 }
 
-type Text struct{}
+type Text struct {
+	httpClient httpclient.HTTPClient
+}
 
 // readFromURL reads a text content from an http/https url
-func readFromURL(url string, line int) (string, error) {
+func (t *Text) readFromURL(url string, line int) (string, error) {
+	if t.httpClient == nil {
+		t.httpClient = httpclient.NewRetryClient()
+	}
 	// #nosec G107 // url is always "user-defined" so it's tainted by nature
-	resp, err := http.Get(url)
+	resp, err := t.httpClient.Get(url)
 	if err != nil {
 		return "", err
 	}
-	logrus.Debugf("HTTP GET to %q got a response with code %d", url, resp.StatusCode)
+	logrus.Debugf("HTTP GET to %q got a response with code %d", redact.URL(url), resp.StatusCode)
 	if resp.StatusCode > 399 {
-		logrus.Debugf("HTTP return code %q for URL %q", resp.StatusCode, url)
-		return "", fmt.Errorf("URL %q not found or in error", url)
+		logrus.Debugf("HTTP return code %q for URL %q", resp.StatusCode, redact.URL(url))
+		return "", fmt.Errorf("URL %q not found or in error", redact.URL(url))
 	}
 
 	defer resp.Body.Close()
 
 	// Only retrieve the specified line in memory if specified
 	if line > 0 {
-		logrus.Debugf("Reading line %d of the content returned from url %q", line, url)
+		logrus.Debugf("Reading line %d of the content returned from url %q", line, redact.URL(url))
 		return getLine(bufio.NewReader(resp.Body), line), nil
 	}
 
 	// Otherwise retrieve the whole file content. Can be heavy.
-	logrus.Debugf("Reading content returned from the url %q", url)
+	logrus.Debugf("Reading content returned from the url %q", redact.URL(url))
 	bodyContent, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -103,8 +110,8 @@ func getLine(reader io.Reader, line int) string {
 // "https://", or file url "file://" or filepath (default)
 func (t *Text) ReadAll(location string) (string, error) {
 	if IsURL(location) {
-		logrus.Debugf("URL detected for location %q", location)
-		content, err := readFromURL(location, 0)
+		logrus.Debugf("URL detected for location %q", redact.URL(location))
+		content, err := t.readFromURL(location, 0)
 		if err != nil {
 			return "", err
 		}
@@ -131,7 +138,7 @@ func (t *Text) ReadAll(location string) (string, error) {
 // "https://", or file url "file://" or filepath (default)
 func (t *Text) ReadLine(location string, line int) (string, error) {
 	if IsURL(location) {
-		content, err := readFromURL(location, line)
+		content, err := t.readFromURL(location, line)
 		if err != nil {
 			return "", err
 		}
@@ -163,7 +170,6 @@ func Diff(from, to, originalFileContent, newFileContent string) string {
 // Show return a string where each line start with a tabulation
 // to increase visibility
 func Show(content string) (result string) {
-
 	result = result + "---\n"
 
 	for _, line := range strings.Split(content, "\n") {
@@ -173,7 +179,6 @@ func Show(content string) (result string) {
 	result = result + "---\n"
 
 	return result
-
 }
 
 // IsURL tests if a string is a valid http URL
@@ -201,7 +206,6 @@ func IsURL(location string) bool {
 
 // WriteToFile write a string to a file
 func (t *Text) WriteToFile(content string, location string) error {
-
 	// If path is not absolute then we specify it to the current directory
 	if !filepath.IsAbs(location) {
 		wd, err := os.Getwd()
@@ -222,12 +226,10 @@ func (t *Text) WriteToFile(content string, location string) error {
 		return err
 	}
 	return nil
-
 }
 
 // WriteLineToFile writes 'lineContent' to the line number 'lineNumber' in the file at 'location'
 func (t *Text) WriteLineToFile(lineContent, location string, lineNumber int) (err error) {
-
 	// Get actual content of the file
 	fileContent, err := t.ReadAll(location)
 	if err != nil {
@@ -235,7 +237,7 @@ func (t *Text) WriteLineToFile(lineContent, location string, lineNumber int) (er
 	}
 
 	// Open the file
-	file, err := os.OpenFile(location, os.O_WRONLY, 0644)
+	file, err := os.OpenFile(location, os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -268,7 +270,7 @@ func (t *Text) FileExists(location string) bool {
 	if IsURL(location) {
 		logrus.Debugf("URL detected for file %q", location)
 		// Try to only get the first line of the remote URL
-		_, err := readFromURL(location, 1)
+		_, err := t.readFromURL(location, 1)
 
 		// No error means that the remote URL exists (1XX, 2XX or 3XX)
 		return err == nil
@@ -280,4 +282,8 @@ func (t *Text) FileExists(location string) bool {
 	}
 
 	return true
+}
+
+func (t *Text) SetHttpClient(client httpclient.HTTPClient) {
+	t.httpClient = client
 }

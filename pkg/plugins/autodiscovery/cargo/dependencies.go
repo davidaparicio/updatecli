@@ -3,6 +3,7 @@ package cargo
 import (
 	"bytes"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"text/template"
@@ -113,7 +114,7 @@ func (c Cargo) generateManifest(crateName string, dependency crateDependency, re
 		RegistryAuthToken          string
 		RegistryHeaderFormat       string
 	}{
-		ManifestName:               fmt.Sprintf("Bump %s %q for %q crate", dependencyType, dependency.Name, crateName),
+		ManifestName:               fmt.Sprintf("deps(cargo): bump %s %q for %q crate", dependencyType, dependency.Name, crateName),
 		CrateName:                  crateName,
 		DependencyName:             dependency.Name,
 		SourceID:                   dependency.Name,
@@ -128,7 +129,7 @@ func (c Cargo) generateManifest(crateName string, dependency crateDependency, re
 		File:                       relativeFile,
 		TargetIDEnable:             isStrictSemver(dependency.Version),
 		TargetID:                   dependency.Name,
-		TargetName:                 fmt.Sprintf("Bump crate dependency %q to {{ source %q }}", dependency.Name, dependency.Name),
+		TargetName:                 fmt.Sprintf("deps(cargo): bump crate dependency %q to {{ source %q }}", dependency.Name, dependency.Name),
 		TargetFile:                 filepath.Base(foundFile),
 		TargetKey:                  TargetKey,
 		TargetCargoCleanupEnabled:  targetCargoCleanupEnabled,
@@ -152,8 +153,15 @@ func (c Cargo) generateManifest(crateName string, dependency crateDependency, re
 func (c Cargo) discoverCargoDependenciesManifests() ([][]byte, error) {
 	var manifests [][]byte
 
+	searchFromDir := c.rootDir
+	// If the spec.RootDir is an absolute path, then it as already been set
+	// correctly in the New function.
+	if c.spec.RootDir != "" && !path.IsAbs(c.spec.RootDir) {
+		searchFromDir = filepath.Join(c.rootDir, c.spec.RootDir)
+	}
+
 	foundCargoFiles, err := findCargoFiles(
-		c.rootDir,
+		searchFromDir,
 		ValidFiles[:],
 	)
 
@@ -182,25 +190,6 @@ func (c Cargo) discoverCargoDependenciesManifests() ([][]byte, error) {
 			}
 		}
 
-		cargoRelativePath := filepath.Dir(relativeFoundCargoFile)
-		cargoCrateName := filepath.Base(cargoRelativePath)
-
-		// Test if the ignore rule based on path doesn't match
-		if len(c.spec.Ignore) > 0 && c.spec.Ignore.isMatchingIgnoreRule(c.rootDir, relativeFoundCargoFile) {
-			logrus.Debugf("Ignoring Cargo Crate %q from %q, as not matching rule(s)\n",
-				cargoCrateName,
-				cargoRelativePath)
-			continue
-		}
-
-		// Test if the only rule based on path match
-		if len(c.spec.Only) > 0 && !c.spec.Only.isMatchingOnlyRule(c.rootDir, relativeFoundCargoFile) {
-			logrus.Debugf("Ignoring Cargo Crate %q from %q, as not matching rule(s)\n",
-				cargoCrateName,
-				cargoRelativePath)
-			continue
-		}
-
 		// Retrieve Cargo dependencies for each crate
 		crate, err := getCrateMetadata(foundCargoFile)
 		if err != nil {
@@ -227,6 +216,21 @@ func (c Cargo) discoverCargoDependenciesManifests() ([][]byte, error) {
 		})
 
 		for _, dependency := range dependencies {
+
+			if len(c.spec.Ignore) > 0 {
+				if c.spec.Ignore.isMatchingRules(c.rootDir, relativeFoundCargoFile, dependency.Registry, dependency.Name, dependency.Version) {
+					logrus.Debugf("Ignoring %s.%s from %q, as matching ignore rule(s)\n", dependency.Registry, dependency.Name, relativeFoundCargoFile)
+					continue
+				}
+			}
+
+			if len(c.spec.Only) > 0 {
+				if !c.spec.Only.isMatchingRules(c.rootDir, relativeFoundCargoFile, dependency.Registry, dependency.Name, dependency.Version) {
+					logrus.Debugf("Ignoring package %s.%s from %q, as not matching only rule(s)\n", dependency.Registry, dependency.Name, relativeFoundCargoFile)
+					continue
+				}
+			}
+
 			manifest, err := c.generateManifest(cr.Name, dependency, relativeFoundCargoFile, foundCargoFile, "dependencies", cargoTargetCleanManifestEnabled)
 			if err != nil {
 				logrus.Debugln(err)
@@ -235,6 +239,20 @@ func (c Cargo) discoverCargoDependenciesManifests() ([][]byte, error) {
 			manifests = append(manifests, manifest.Bytes())
 		}
 		for _, dependency := range devDependencies {
+			if len(c.spec.Ignore) > 0 {
+				if c.spec.Ignore.isMatchingRules(c.rootDir, relativeFoundCargoFile, dependency.Registry, dependency.Name, dependency.Version) {
+					logrus.Debugf("Ignoring %s.%s from %q, as matching ignore rule(s)\n", dependency.Registry, dependency.Name, relativeFoundCargoFile)
+					continue
+				}
+			}
+
+			if len(c.spec.Only) > 0 {
+				if !c.spec.Only.isMatchingRules(c.rootDir, relativeFoundCargoFile, dependency.Registry, dependency.Name, dependency.Version) {
+					logrus.Debugf("Ignoring package %s.%s from %q, as not matching only rule(s)\n", dependency.Registry, dependency.Name, relativeFoundCargoFile)
+					continue
+				}
+			}
+
 			manifest, err := c.generateManifest(cr.Name, dependency, relativeFoundCargoFile, foundCargoFile, "dev-dependencies", cargoTargetCleanManifestEnabled)
 			if err != nil {
 				logrus.Debugln(err)

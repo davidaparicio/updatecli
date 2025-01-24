@@ -1,12 +1,10 @@
 package gomod
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/updatecli/updatecli/pkg/core/result"
 )
 
 func TestCondition(t *testing.T) {
@@ -27,38 +25,49 @@ func TestCondition(t *testing.T) {
 		},
 		{
 			spec: Spec{
+				File:   "testdata/go.mod",
+				Module: "sigs.k8s.io/yaml",
+			},
+			expectedResult: true,
+		},
+		{
+			spec: Spec{
 				File:    "testdata/go.mod",
 				Module:  "sigs.k8s.io/yaml",
 				Version: "v0.0.99",
 			},
-			expectedResult:   false,
-			expectedError:    true,
-			expectedErrorMsg: errors.New("golang module version \"v1.3.0\" found for \"sigs.k8s.io/yaml\", expecting \"v0.0.99\""),
+			expectedResult: false,
 		},
 		{
 			spec: Spec{
 				File:    "testdata/go.mod",
 				Version: "v0.0.99",
 			},
-			expectedResult:   false,
-			expectedError:    true,
-			expectedErrorMsg: errors.New("golang version \"1.20\" found, expecting \"v0.0.99\""),
+			expectedResult: false,
+		},
+		{
+			name: "Test retrieving module from https",
+			spec: Spec{
+				File:    "https://raw.githubusercontent.com/updatecli/updatecli/v0.60.0/go.mod",
+				Module:  "github.com/Masterminds/sprig/v3",
+				Version: "v3.2.3",
+			},
+			expectedResult: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := New(tt.spec)
 			require.NoError(t, err)
-			gotResult := result.Condition{}
-			err = got.Condition("", nil, &gotResult)
+			gotResult, _, gotErr := got.Condition("", nil)
 			if tt.expectedError {
-				if assert.Error(t, err) {
-					assert.Equal(t, err.Error(), tt.expectedErrorMsg.Error())
+				if assert.Error(t, gotErr) {
+					assert.Equal(t, gotErr.Error(), tt.expectedErrorMsg.Error())
 				}
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expectedResult, gotResult.Pass)
+			require.NoError(t, gotErr)
+			assert.Equal(t, tt.expectedResult, gotResult)
 		})
 	}
 }

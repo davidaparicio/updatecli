@@ -2,6 +2,7 @@ package stash
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -18,102 +19,103 @@ import (
 	"github.com/updatecli/updatecli/pkg/plugins/utils/gitgeneric"
 )
 
-// Spec defines settings used to interact with Bitbucket release
+// Spec defines settings used to interact with Bitbucket Server release
 type Spec struct {
 	client.Spec `yaml:",inline,omitempty"`
-	/*
-		"commitMessage" is used to generate the final commit message.
-
-		compatible:
-			* scm
-
-		remark:
-			it's worth mentioning that the commit message settings is applied to all targets linked to the same scm.
-	*/
+	//  "commitMessage" is used to generate the final commit message.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  remark:
+	//    it's worth mentioning that the commit message settings is applied to all targets linked to the same scm.
 	CommitMessage commit.Commit `yaml:",omitempty"`
-	/*
-		"directory" defines the local path where the git repository is cloned.
-
-		compatible:
-			* scm
-
-		remark:
-			Unless you know what you are doing, it is recommended to use the default value.
-			The reason is that Updatecli may automatically clean up the directory after a pipeline execution.
-
-		default:
-			/tmp/updatecli/github/<owner>/<repository>
-	*/
+	//  "directory" defines the local path where the git repository is cloned.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  remark:
+	//    Unless you know what you are doing, it is recommended to use the default value.
+	//    The reason is that Updatecli may automatically clean up the directory after a pipeline execution.
+	//
+	//  default:
+	//    The default value is based on your local temporary directory like: (on Linux)
+	//    /tmp/updatecli/stash/<owner>/<repository>
 	Directory string `yaml:",omitempty"`
-	/*
-		"email" defines the email used to commit changes.
-
-		compatible:
-			* scm
-
-		default:
-			default set to your global git configuration
-	*/
+	//  "email" defines the email used to commit changes.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    default set to your global git configuration
 	Email string `yaml:",omitempty"`
-	/*
-		"force" is used during the git push phase to run `git push --force`.
-
-		compatible:
-			* scm
-	*/
-	Force bool `yaml:",omitempty"`
-	/*
-		"gpg" specifies the GPG key and passphrased used for commit signing
-
-		compatible:
-			* scm
-	*/
+	//  "force" is used during the git push phase to run `git push --force`.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    false
+	//
+	//  remark:
+	//    When force is set to true, Updatecli also recreate the working branches that
+	//    diverged from their base branch.
+	Force *bool `yaml:",omitempty"`
+	//	"gpg" specifies the GPG key and passphrased used for commit signing
+	//
+	//	compatible:
+	//		* scm
 	GPG sign.GPGSpec `yaml:",omitempty"`
-	/*
-		"owner" defines the owner of a repository.
-
-		compatible:
-			* scm
-	*/
+	//	"owner" defines the owner of a repository.
+	//
+	//	compatible:
+	//		* scm
 	Owner string `yaml:",omitempty" jsonschema:"required"`
-	/*
-		repository specifies the name of a repository for a specific owner.
-
-		compatible:
-			* scm
-	*/
+	//	repository specifies the name of a repository for a specific owner.
+	//
+	//	compatible:
+	//		* scm
 	Repository string `yaml:",omitempty" jsonschema:"required"`
-	/*
-		"user" specifies the user associated with new git commit messages created by Updatecli
-
-		compatible:
-			* scm
-	*/
+	//	"user" specifies the user associated with new git commit messages created by Updatecli
+	//
+	//	compatible:
+	//		* scm
 	User string `yaml:",omitempty"`
-	/*
-		"branch" defines the git branch to work on.
-
-		compatible:
-			* scm
-
-		default:
-			main
-
-		remark:
-			depending on which resource references the Stash scm, the behavior will be different.
-
-			If the scm is linked to a source or a condition (using scmid), the branch will be used to retrieve
-			file(s) from that branch.
-
-			If the scm is linked to target then Updatecli creates a new "working branch" based on the branch value.
-			The working branch created by Updatecli looks like "updatecli_<pipelineID>".
-			It is worth mentioning that it is not possible to bypass the working branch in the current situation.
-			For more information, please refer to the following issue:
-			https://github.com/updatecli/updatecli/issues/1139
-
-			If you need to push changes to a specific branch, you must use the plugin "git" instead of this
-	*/
+	//  "branch" defines the git branch to work on.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    main
+	//
+	//  remark:
+	//    depending on which resource references the Stash scm, the behavior will be different.
+	//
+	//    If the scm is linked to a source or a condition (using scmid), the branch will be used to retrieve
+	//    file(s) from that branch.
+	//
+	//    If the scm is linked to target then Updatecli creates a new "working branch" based on the branch value.
+	//    The working branch created by Updatecli looks like "updatecli_<pipelineID>".
+	//    The working branch can be disabled using the "workingBranch" parameter set to false.
 	Branch string `yaml:",omitempty"`
+	//  "submodules" defines if Updatecli should checkout submodules.
+	//
+	//  compatible:
+	//	  * scm
+	//
+	//  default: true
+	Submodules *bool `yaml:",omitempty"`
+	//  "workingBranch" defines if Updatecli should use a temporary branch to work on.
+	//  If set to `true`, Updatecli create a temporary branch to work on, based on the branch value.
+	//
+	//  compatible:
+	//	  * scm
+	//
+	//  default: true
+	WorkingBranch *bool `yaml:",omitempty"`
 }
 
 // Stash contains information to interact with Stash api
@@ -124,9 +126,11 @@ type Stash struct {
 	client           client.Client
 	pipelineID       string
 	nativeGitHandler gitgeneric.GitHandler
+	workingBranch    bool
+	force            bool
 }
 
-// New returns a new valid Bitbucket object.
+// New returns a new valid Bitbucket Server object.
 func New(spec interface{}, pipelineID string) (*Stash, error) {
 	var s Spec
 	var clientSpec client.Spec
@@ -144,7 +148,6 @@ func New(spec interface{}, pipelineID string) (*Stash, error) {
 	}
 
 	err = clientSpec.Validate()
-
 	if err != nil {
 		return &Stash{}, err
 	}
@@ -157,7 +160,6 @@ func New(spec interface{}, pipelineID string) (*Stash, error) {
 	s.Spec = clientSpec
 
 	err = s.Validate()
-
 	if err != nil {
 		return &Stash{}, err
 	}
@@ -171,8 +173,37 @@ func New(spec interface{}, pipelineID string) (*Stash, error) {
 		s.Branch = "main"
 	}
 
-	c, err := client.New(clientSpec)
+	workingBranch := true
+	if s.WorkingBranch != nil {
+		workingBranch = *s.WorkingBranch
+	}
 
+	force := true
+	if s.Force != nil {
+		force = *s.Force
+	}
+
+	if force {
+		if !workingBranch && s.Force == nil {
+			errorMsg := fmt.Sprintf(`
+Better safe than sorry.
+
+Updatecli may be pushing unwanted changes to the branch %q.
+
+The Stash scm plugin has by default the force option set to true,
+The scm force option set to true means that Updatecli is going to run "git push --force"
+Some target plugin, like the shell one, run "git commit -A" to catch all changes done by that target.
+
+If you know what you are doing, please set the force option to true in your configuration file to ignore this error message.
+`, s.Branch)
+
+			logrus.Errorln(errorMsg)
+			return nil, errors.New("unclear configuration, better safe than sorry")
+
+		}
+	}
+
+	c, err := client.New(clientSpec)
 	if err != nil {
 		return &Stash{}, err
 	}
@@ -183,17 +214,17 @@ func New(spec interface{}, pipelineID string) (*Stash, error) {
 		client:           c,
 		pipelineID:       pipelineID,
 		nativeGitHandler: nativeGitHandler,
+		workingBranch:    workingBranch,
+		force:            force,
 	}
 
 	g.setDirectory()
 
 	return &g, nil
-
 }
 
-// Retrieve git tags from a remote bitbucket repository
+// Retrieve git tags from a remote Bitbucket Server repository
 func (s *Stash) SearchTags() (tags []string, err error) {
-
 	// Timeout api query after 30sec
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -208,7 +239,6 @@ func (s *Stash) SearchTags() (tags []string, err error) {
 			Size: 30,
 		},
 	)
-
 	if err != nil {
 		return nil, err
 	}

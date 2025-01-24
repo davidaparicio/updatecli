@@ -7,36 +7,55 @@ import (
 )
 
 // Source returns the latest git tag based on create time
-func (gt *GitBranch) Source(workingDir string, resultSource *result.Source) error {
+func (gb *GitBranch) Source(workingDir string, resultSource *result.Source) error {
+	var err error
 
-	if len(gt.spec.Path) == 0 && len(workingDir) > 0 {
-		gt.spec.Path = workingDir
+	gb.directory = workingDir
+	if gb.spec.URL != "" {
+		gb.directory, err = gb.clone()
+		if err != nil {
+			return err
+		}
+
+	} else if gb.spec.Path != "" {
+		gb.directory = gb.spec.Path
 	}
 
-	err := gt.Validate()
-	if err != nil {
-		return fmt.Errorf("validating git branch: %w", err)
+	if gb.directory == "" {
+		return fmt.Errorf("Unknown Git working directory. Did you specify one of `spec.URL`, `scmid` or a `spec.path`?")
 	}
 
-	tags, err := gt.nativeGitHandler.Branches(workingDir)
+	refs, err := gb.nativeGitHandler.BranchRefs(gb.directory)
 
 	if err != nil {
 		return fmt.Errorf("retrieving branches: %w", err)
 	}
 
-	gt.foundVersion, err = gt.versionFilter.Search(tags)
+	values := []string{}
+	for _, ref := range refs {
+		values = append(values, ref.Name)
+	}
+	gb.foundVersion, err = gb.versionFilter.Search(values)
 	if err != nil {
 		return fmt.Errorf("filtering branches: %w", err)
 	}
-	value := gt.foundVersion.GetVersion()
+	value := gb.foundVersion.GetVersion()
 
 	if len(value) == 0 {
-		return fmt.Errorf("no Git Branch found matching pattern %q", gt.versionFilter.Pattern)
+		return fmt.Errorf("no Git Branch found matching pattern %q", gb.versionFilter.Pattern)
+	}
+
+	if gb.spec.Key == "hash" {
+		for i := range refs {
+			if refs[i].Name == value {
+				value = refs[i].Hash
+			}
+		}
 	}
 
 	resultSource.Result = result.SUCCESS
 	resultSource.Information = value
-	resultSource.Description = fmt.Sprintf("git branch %q found matching pattern %q", value, gt.versionFilter.Pattern)
+	resultSource.Description = fmt.Sprintf("git branch %q found matching pattern %q", value, gb.versionFilter.Pattern)
 
 	return nil
 }

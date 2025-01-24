@@ -18,12 +18,6 @@ var (
 		Short: "apply checks and apply changes defined by the compose file",
 		Run: func(cmd *cobra.Command, args []string) {
 
-			// TODO: To be removed once not experimental anymore
-			if !experimental {
-				logrus.Warningf("The 'compose' subcommand requires the flag experimental to work, such as:\n\t`updatecli compose apply --experimental`")
-				os.Exit(1)
-			}
-
 			c, err := compose.New(composeCmdFile)
 			if err != nil {
 				logrus.Errorf("command failed: %s", err)
@@ -53,7 +47,7 @@ var (
 )
 
 func init() {
-	composeApplyCmd.Flags().StringVarP(&composeCmdFile, "file", "f", "update-compose.yaml", "Define the update-compose file")
+	composeApplyCmd.Flags().StringVarP(&composeCmdFile, "file", "f", composeDefaultCmdFile, "Define the update-compose file")
 
 	composeApplyCmd.Flags().BoolVarP(&composeApplyCommit, "commit", "", true, "Record changes to the repository, '--commit=false'")
 	composeApplyCmd.Flags().BoolVarP(&composeApplyPush, "push", "", true, "Update remote refs '--push=false'")

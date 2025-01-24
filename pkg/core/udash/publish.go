@@ -8,32 +8,57 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/updatecli/updatecli/pkg/core/httpclient"
 	"github.com/updatecli/updatecli/pkg/core/reports"
 )
 
 var (
-	// ErrNoUdashBearerToken is returned if we couldn't find a token in the local updatecli configuration file
-	ErrNoUdashBearerToken error = fmt.Errorf("no bearer token found")
 	// ErrNoUdashAPIURL is returned if we couldn't find an Updatecli report API
 	ErrNoUdashAPIURL error = fmt.Errorf("no Updatecli API defined")
 )
 
 // Publish publish a pipeline report to the updatecli api
 func Publish(r *reports.Report) error {
-	logrus.Infof("\n\n%s\n", strings.ToTitle("Report"))
-	logrus.Infof("%s\n\n", strings.Repeat("=", len("Report")+1))
+
+	logrus.Infof("Publishing report to Udash")
+
+	// setDefaultParam sets the default value for a parameter
+	setDefaultParam := func(envParam *string, configParam, envParamName, configParamName string) {
+		if *envParam != "" && configParam != "" {
+			logrus.Debugf("%s provided via environment variable %q supersede value %q from %q in config file",
+				*envParam,
+				envParamName,
+				configParamName,
+				configParam)
+			return
+		} else if *envParam == "" && configParam != "" {
+			*envParam = configParam
+		}
+	}
 
 	err := r.UpdateID()
 	if err != nil {
 		return fmt.Errorf("generating report IDs: %w", err)
 	}
 
-	reportURLString, reportApiURLString, bearerToken, err := Token("")
-	if err != nil {
-		return fmt.Errorf("retrieving service access token: %w", err)
+	reportURLString, reportApiURLString, bearerToken := getConfigFromEnv()
+	if reportApiURLString == "" {
+		logrus.Debugf("no Udash API URL detected via environment variables, looking for a configuration file")
+		localReportURLString, localReportApiURLString, localBearerToken, err := getConfigFromFile("")
+		if err != nil {
+			logrus.Debugf("retrieving service access token: %s", err)
+		}
+
+		setDefaultParam(&reportApiURLString, localReportApiURLString, DefaultEnvVariableAPIURL, "api")
+		setDefaultParam(&reportURLString, localReportURLString, DefaultEnvVariableURL, "url")
+		setDefaultParam(&bearerToken, localBearerToken, DefaultEnvVariableAccessToken, "token")
+	}
+
+	if reportApiURLString == "" {
+		logrus.Infof("no Udash endpoint detected, skipping report publication")
+		return nil
 	}
 
 	reportApiURL, err := url.Parse(reportApiURLString)
@@ -46,11 +71,7 @@ func Publish(r *reports.Report) error {
 		return fmt.Errorf("parsing report URL: %w", err)
 	}
 
-	if bearerToken == "" {
-		return ErrNoUdashBearerToken
-	}
-
-	jsonBody, err := json.Marshal(r)
+	jsonBody, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling json: %w", err)
 	}
@@ -58,18 +79,17 @@ func Publish(r *reports.Report) error {
 	bodyReader := bytes.NewReader(jsonBody)
 
 	u := reportApiURL.JoinPath("pipeline", "reports")
-	if err != nil {
-		return fmt.Errorf("generating URL: %w", err)
-	}
 
-	client := &http.Client{}
+	client := httpclient.NewRetryClient()
 
 	req, err := http.NewRequest("POST", u.String(), bodyReader)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", bearerToken))
+	if bearerToken != "" {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", bearerToken))
+	}
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -109,7 +129,6 @@ func Publish(r *reports.Report) error {
 	}
 
 	r.ReportURL = reportURL.JoinPath("pipeline", "reports", d.ReportID).String()
-	logrus.Printf("Report available on:\n\t * %q", r.ReportURL)
 
 	return nil
 }

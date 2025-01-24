@@ -43,12 +43,42 @@ type Target struct {
 type Config struct {
 	// ResourceConfig defines target input parameters
 	resource.ResourceConfig `yaml:",inline"`
+	// dependsonchange enables the mechanism to check if the dependant target(s) have made a change.
+	// If the dependant target(s) have not made a change the target will be skipped.
+	//
+	// default:
+	//   false
+	DependsOnChange bool `yaml:",omitempty"`
 	// ! Deprecated - please use all lowercase `sourceid`
 	DeprecatedSourceID string `yaml:"sourceID,omitempty" jsonschema:"-"`
-	// disablesourceinput disables the mechanism to retrieve a default value from a source. For example, if true, source information like changelog will not be accessible for a github/pullrequest action.
+	// disablesourceinput disables the mechanism to retrieve a default value from a source.
+	// For example, if true, source information like changelog will not be accessible for a github/pullrequest action.
+	//
+	// default:
+	//  false
 	DisableSourceInput bool `yaml:",omitempty"`
-	// sourceid specifies where retrieving the default value
+	// sourceid specifies where retrieving the default value.
+	//
+	// default:
+	//   if only one source is defined, then sourceid is set to that sourceid.
 	SourceID string `yaml:",omitempty"`
+	// ! Deprecated - please use DependsOn with `condition#conditionid` keys
+	//
+	// conditionids specifies the list of conditions to be evaluated before running the target.
+	// if at least one condition is not met, the target will be skipped.
+	//
+	// default:
+	//   by default, all conditions are evaluated.
+	DeprecatedConditionIDs []string `yaml:"conditionids,omitempty"`
+	// disableconditions disables the mechanism to evaluate all conditions before running the target.
+	//
+	// default:
+	//   false
+	//
+	// remark:
+	//  It's possible to only monitor specific conditions by setting disableconditions to true
+	//  and using DependsOn with `condition#conditionid` keys
+	DisableConditions bool `yaml:"disableconditions,omitempty"`
 }
 
 // Check verifies if mandatory Targets parameters are provided and return false if not.
@@ -72,14 +102,14 @@ func (t *Target) Check() (bool, error) {
 func (t *Target) Run(source string, o *Options) (err error) {
 	var consoleOutput bytes.Buffer
 	// By default logrus logs to stderr, so I guess we want to keep this behavior...
-	logrus.SetOutput(io.MultiWriter(os.Stderr, &consoleOutput))
+	logrus.SetOutput(io.MultiWriter(os.Stdout, &consoleOutput))
 	/*
 		The last defer will be executed first,
 		so in this case we want to first save the console output
 		before setting back the logrus output to stdout.
 	*/
-	// By default logrus logs to stderr, so I guess we want to keep this behavior...
-	defer logrus.SetOutput(os.Stderr)
+	// By default logrus logs to stdout and we want to keep this behavior...
+	defer logrus.SetOutput(os.Stdout)
 	defer t.Result.SetConsoleOutput(&consoleOutput)
 
 	failTargetRun := func() {
@@ -104,11 +134,6 @@ func (t *Target) Run(source string, o *Options) (err error) {
 		failTargetRun()
 		return err
 	}
-
-	// Ensure the result named contains the up to date target name
-	// after templating
-	t.Result.Name = t.Config.ResourceConfig.Name
-	t.Result.DryRun = o.DryRun
 
 	// If no scm configuration provided then stop early
 	if t.Scm == nil {
@@ -155,16 +180,31 @@ func (t *Target) Run(source string, o *Options) (err error) {
 		return err
 	}
 
+	// targetCommit is used to avoid committing changes when the target has no changes.
+	targetCommit := true
 	if !t.Result.Changed {
 		if isRemoteBranchUpToDate {
 			return nil
 		}
 
-		logrus.Infof("\n\u26A0 While nothing change in the current pipeline run, according to the git history, some commits will be pushed\n")
+		logrus.Infof("\n\u26A0 While nothing change in the current pipeline run, according to the git history, some commits must be pushed\n")
+		t.Result.Description = fmt.Sprintf("%s\n\n%s", t.Result.Description, "While nothing change in the current pipeline run, according to the git history, some commits must pushed")
+
+		// Even though the target has no changes, it has something to commit.
+		// We consider this result as "success" and not "attention" as the target has no changes.
+		// If later we decide to consider the result as "attention" then we also need to consider that the action
+		// will be trigger in priority. cfr https://github.com/updatecli/updatecli/issues/2039
+		// So we need to create a new resource stage to handle this case.
+		t.Result.Result = result.SUCCESS
+		t.Result.Changed = true
+		// Even though the target has left over changes, it has nothing to commit.
+		targetCommit = false
 	}
 
 	if !o.DryRun {
-		if t.Result.Changed {
+		// o.Commit represents Global updatecli commit option
+		// targetCommit represents the local target commit option
+		if o.Commit && targetCommit {
 			if t.Result.Description == "" {
 				failTargetRun()
 				return fmt.Errorf("target has no change message")
@@ -175,29 +215,28 @@ func (t *Target) Run(source string, o *Options) (err error) {
 				return fmt.Errorf("no changed file to commit")
 			}
 
-			if o.Commit {
-				if err := s.Add(t.Result.Files); err != nil {
-					failTargetRun()
-					return err
-				}
+			if err := s.Add(t.Result.Files); err != nil {
+				failTargetRun()
+				return err
+			}
 
-				/*
-					not every target have a name as it wasn't mandatory in the past
-					so we use the description as a fallback
-				*/
-				commitMessage := t.Config.Name
-				if commitMessage == "" {
-					commitMessage = t.Result.Description
-				}
-				if err = s.Commit(commitMessage); err != nil {
-					failTargetRun()
-					return err
-				}
+			/*
+				not every target have a name as it wasn't mandatory in the past
+				so we use the description as a fallback
+			*/
+			commitMessage := t.Config.ResourceConfig.Name
+			if commitMessage == "" {
+				commitMessage = t.Result.Description
+			}
+			if err = s.Commit(commitMessage); err != nil {
+				failTargetRun()
+				return err
 			}
 		}
 
 		if o.Push {
-			if err := s.Push(); err != nil {
+			t.Result.Scm.BranchReset, err = s.Push()
+			if err != nil {
 				failTargetRun()
 				return err
 			}
@@ -209,7 +248,6 @@ func (t *Target) Run(source string, o *Options) (err error) {
 
 // JSONSchema implements the json schema interface to generate the "target" jsonschema.
 func (Config) JSONSchema() *jschema.Schema {
-
 	type configAlias Config
 
 	anyOfSpec := resource.GetResourceMapping()
@@ -271,6 +309,21 @@ func (c *Config) Validate() error {
 		default:
 			logrus.Warningf("%q and %q are mutually exclusive, ignoring %q",
 				"sourceID", "sourceid", "sourceID")
+		}
+	}
+
+	// Handle ConditionIDs deprecation
+	if len(c.DeprecatedConditionIDs) > 0 {
+		if len(c.ResourceConfig.DependsOn) > 0 {
+			logrus.Warningf("%q and %q are mutually exclusive, ignoring %q", "conditionids", "dependson", "conditionids")
+		} else {
+			logrus.Warningf("%q is deprecated in favor of %q", "conditionids", "dependson")
+			for _, condition := range c.DeprecatedConditionIDs {
+				logrus.Warningf("%q is deprecated in favor of %q: %s", "conditionids", "dependson", condition)
+				c.ResourceConfig.DependsOn = append(c.ResourceConfig.DependsOn, fmt.Sprintf("condition#%s", condition))
+			}
+			c.DeprecatedConditionIDs = []string{}
+			c.DisableConditions = true
 		}
 	}
 

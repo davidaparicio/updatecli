@@ -20,14 +20,14 @@ func TestGetPolicies(t *testing.T) {
 	}{
 		{
 			name: "Test getPolicies with environment variables",
-			file: "testdata/update-compose.yaml",
+			file: "testdata/updatecli-compose.yaml",
 			expectedManifests: []manifest.Manifest{
 				{
 					Manifests: []string{
-						filepath.Join("/", "tmp", "updatecli", "store", "7aaff2727eef42f7d0add2d5ed3fd83f74a125420682bec7e4bc8835bb28e833", "updatecli.d", "default.tpl"),
+						filepath.Join(os.TempDir(), "updatecli", "store", "7aaff2727eef42f7d0add2d5ed3fd83f74a125420682bec7e4bc8835bb28e833", "updatecli.d", "default.tpl"),
 					},
 					Values: []string{
-						filepath.Join("/", "tmp", "updatecli", "store", "7aaff2727eef42f7d0add2d5ed3fd83f74a125420682bec7e4bc8835bb28e833", "values.yaml"),
+						filepath.Join(os.TempDir(), "updatecli", "store", "7aaff2727eef42f7d0add2d5ed3fd83f74a125420682bec7e4bc8835bb28e833", "values.yaml"),
 					},
 				},
 			},

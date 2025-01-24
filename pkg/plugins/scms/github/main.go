@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/shurcooL/githubv4"
 
+	"github.com/updatecli/updatecli/pkg/core/httpclient"
 	"github.com/updatecli/updatecli/pkg/core/tmp"
 	"github.com/updatecli/updatecli/pkg/plugins/scms/git/commit"
 	"github.com/updatecli/updatecli/pkg/plugins/scms/git/sign"
@@ -23,140 +26,154 @@ import (
 
 // Spec represents the configuration input
 type Spec struct {
-	/*
-		"branch" defines the git branch to work on.
-
-		compatible:
-			* scm
-
-		default:
-			main
-
-		remark:
-			depending on which resource references the GitHub scm, the behavior will be different.
-
-			If the scm is linked to a source or a condition (using scmid), the branch will be used to retrieve
-			file(s) from that branch.
-
-			If the scm is linked to target then Updatecli creates a new "working branch" based on the branch value.
-			The working branch created by Updatecli looks like "updatecli_<pipelineID>".
-			It is worth mentioning that it is not possible to by pass the working branch in the current situation.
-			For more information, please refer to the following issue:
-			https://github.com/updatecli/updatecli/issues/1139
-
-			If you need to push changes to a specific branch, you must use the plugin "git" instead of this
-
-	*/
+	//  "branch" defines the git branch to work on.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    main
+	//
+	//  remark:
+	//    depending on which resource references the GitHub scm, the behavior will be different.
+	//
+	//    If the scm is linked to a source or a condition (using scmid), the branch will be used to retrieve
+	//    file(s) from that branch.
+	//
+	//    If the scm is linked to target then Updatecli creates a new "working branch" based on the branch value.
+	//    The working branch created by Updatecli looks like "updatecli_<pipelineID>".
+	//    The working branch can be disabled using the "workingBranch" parameter set to false.
 	Branch string `yaml:",omitempty"`
-	/*
-		"directory" defines the local path where the git repository is cloned.
-
-		compatible:
-			* scm
-
-		remark:
-			Unless you know what you are doing, it is recommended to use the default value.
-			The reason is that Updatecli may automatically clean up the directory after a pipeline execution.
-
-		default:
-			/tmp/updatecli/github/<owner>/<repository>
-	*/
+	//  "directory" defines the local path where the git repository is cloned.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  remark:
+	//    Unless you know what you are doing, it is recommended to use the default value.
+	//    The reason is that Updatecli may automatically clean up the directory after a pipeline execution.
+	//
+	//  default:
+	//    The default value is based on your local temporary directory like: (on Linux)
+	//    /tmp/updatecli/github/<owner>/<repository>
 	Directory string `yaml:",omitempty"`
-	/*
-		"email" defines the email used to commit changes.
-
-		compatible:
-			* scm
-
-		default:
-			default set to your global git configuration
-	*/
+	//  "email" defines the email used to commit changes.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    default set to your global git configuration
 	Email string `yaml:",omitempty"`
-	/*
-		"owner" defines the owner of a repository.
-
-		compatible:
-			* scm
-	*/
+	//  "owner" defines the owner of a repository.
+	//
+	//  compatible:
+	//    * scm
 	Owner string `yaml:",omitempty" jsonschema:"required"`
-	/*
-		repository specifies the name of a repository for a specific owner.
-
-		compatible:
-			* scm
-	*/
+	//  "repository" specifies the name of a repository for a specific owner.
+	//
+	//  compatible:
+	//    * scm
 	Repository string `yaml:",omitempty" jsonschema:"required"`
-	/*
-		"token" specifies the credential used to authenticate with GitHub API.
-
-		compatible:
-			* scm
-	*/
+	//	"token" specifies the credential used to authenticate with GitHub API.
+	//
+	//	compatible:
+	//		* scm
 	Token string `yaml:",omitempty" jsonschema:"required"`
-	/*
-		url specifies the default github url in case of GitHub enterprise
-
-		compatible:
-			* scm
-
-		default:
-			github.com
-	*/
+	//  "url" specifies the default github url in case of GitHub enterprise
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  default:
+	//    github.com
+	//
+	//  remark:
+	//    A token is a sensitive information, it's recommended to not set this value directly in the configuration file
+	//    but to use an environment variable or a SOPS file.
+	//
+	//    The value can be set to `{{ requiredEnv "GITHUB_TOKEN"}}` to retrieve the token from the environment variable `GITHUB_TOKEN`
+	//	  or `{{ .github.token }}` to retrieve the token from a SOPS file.
+	//
+	//	  For more information, about a SOPS file, please refer to the following documentation:
+	//    https://github.com/getsops/sops
+	//
 	URL string `yaml:",omitempty"`
-	/*
-		"username" specifies the username used to authenticate with GitHub API.
-
-		compatible:
-			* scm
-
-		remark:
-			the token is usually enough to authenticate with GitHub API.
-	*/
+	//  "username" specifies the username used to authenticate with GitHub API.
+	//
+	//  compatible:
+	//    * scm
+	//
+	//  remark:
+	//    the token is usually enough to authenticate with GitHub API. Needed when working with GitHub private repositories.
 	Username string `yaml:",omitempty"`
-	/*
-		"user" specifies the user associated with new git commit messages created by Updatecli
-
-		compatible:
-			* scm
-	*/
+	//  "user" specifies the user associated with new git commit messages created by Updatecli
+	//
+	//  compatible:
+	//    * scm
 	User string `yaml:",omitempty"`
-	/*
-		"gpg" specifies the GPG key and passphrased used for commit signing
-
-		compatible:
-			* scm
-	*/
+	//  "gpg" specifies the GPG key and passphrased used for commit signing
+	//
+	//  compatible:
+	//    * scm
 	GPG sign.GPGSpec `yaml:",omitempty"`
-	/*
-		"force" is used during the git push phase to run `git push --force`.
-
-		compatible:
-			* scm
-
-		default:
-			false
-	*/
-	Force bool `yaml:",omitempty"`
-	/*
-		"commitMessage" is used to generate the final commit message.
-
-		compatible:
-			* scm
-
-		remark:
-			it's worth mentioning that the commit message settings is applied to all targets linked to the same scm.
-	*/
+	//	"force" is used during the git push phase to run `git push --force`.
+	//
+	//	compatible:
+	//    * scm
+	//
+	//	default:
+	//    false
+	//
+	//  remark:
+	//    When force is set to true, Updatecli also recreates the working branches that
+	//    diverged from their base branch.
+	Force *bool `yaml:",omitempty"`
+	//	"commitMessage" is used to generate the final commit message.
+	//
+	//	compatible:
+	//		* scm
+	//
+	//	remark:
+	//		it's worth mentioning that the commit message settings is applied to all targets linked to the same scm.
 	CommitMessage commit.Commit `yaml:",omitempty"`
+	//  "submodules" defines if Updatecli should checkout submodules.
+	//
+	//  compatible:
+	//	  * scm
+	//
+	//  default: true
+	Submodules *bool `yaml:",omitempty"`
+	//  "workingBranch" defines if Updatecli should use a temporary branch to work on.
+	//  If set to `true`, Updatecli create a temporary branch to work on, based on the branch value.
+	//
+	//  compatible:
+	//	  * scm
+	//
+	//  default: true
+	WorkingBranch *bool `yaml:",omitempty"`
+	//  "commitUsingApi" defines if Updatecli should use GitHub GraphQL API to create the commit.
+	//  When set to `true`, a commit created from a GitHub action using the GITHUB_TOKEN will automatically be signed by GitHub.
+	//  More info on https://github.com/updatecli/updatecli/issues/1914
+	//
+	//  compatible:
+	//	  * scm
+	//
+	//  default: false
+	CommitUsingAPI *bool `yaml:",omitempty"`
 }
 
 // GitHub contains settings to interact with GitHub
 type Github struct {
+	force bool
 	// Spec contains inputs coming from updatecli configuration
 	Spec             Spec
 	pipelineID       string
 	client           GitHubClient
 	nativeGitHandler gitgeneric.GitHandler
 	mu               sync.RWMutex
+	workingBranch    bool
+	commitUsingApi   bool
 }
 
 // Repository contains GitHub repository data
@@ -167,6 +184,13 @@ type Repository struct {
 	ParentID    string
 	ParentName  string
 	ParentOwner string
+	Status      string
+}
+
+type RepositoryRef struct {
+	ID               string
+	HeadOid          string
+	DefaultBranchOid string
 }
 
 // New returns a new valid GitHub object.
@@ -178,7 +202,7 @@ func New(s Spec, pipelineID string) (*Github, error) {
 		for _, err := range errs {
 			strErrs = append(strErrs, err.Error())
 		}
-		return &Github{}, fmt.Errorf(strings.Join(strErrs, "\n"))
+		return &Github{}, fmt.Errorf("%s", strings.Join(strErrs, "\n"))
 	}
 
 	if s.Directory == "" {
@@ -197,13 +221,60 @@ func New(s Spec, pipelineID string) (*Github, error) {
 	src := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: s.Token},
 	)
-	httpClient := oauth2.NewClient(context.Background(), src)
+
+	clientContext := context.WithValue(
+		context.Background(),
+		oauth2.HTTPClient,
+		httpclient.NewRetryClient().(*http.Client))
+
+	httpClient := oauth2.NewClient(clientContext, src)
+
 	nativeGitHandler := gitgeneric.GoGit{}
 
+	// By default, we create a working branch but if for some reason we don't want to create it
+	// Then we also need to update the force safeguard to avoid force pushing on the main branch.
+	workingBranch := true
+	if s.WorkingBranch != nil {
+		workingBranch = *s.WorkingBranch
+	}
+
+	force := true
+	if s.Force != nil {
+		force = *s.Force
+	}
+
+	commitUsingApi := false
+	if s.CommitUsingAPI != nil {
+		commitUsingApi = *s.CommitUsingAPI
+	}
+
+	if force {
+		if !workingBranch && s.Force == nil {
+			errorMsg := fmt.Sprintf(`
+Better safe than sorry.
+
+Updatecli may be pushing unwanted changes to the branch %q.
+
+The GitHub scm plugin has by default the force option set to true,
+The scm force option set to true means that Updatecli is going to run "git push --force"
+Some target plugin, like the shell one, run "git commit -A" to catch all changes done by that target.
+
+If you know what you are doing, please set the force option to true in your configuration file to ignore this error message.
+`, s.Branch)
+
+			logrus.Errorln(errorMsg)
+			return nil, errors.New("unclear configuration, better safe than sorry")
+
+		}
+	}
+
 	g := Github{
+		force:            force,
 		Spec:             s,
 		pipelineID:       pipelineID,
 		nativeGitHandler: nativeGitHandler,
+		workingBranch:    workingBranch,
+		commitUsingApi:   commitUsingApi,
 	}
 
 	if strings.HasSuffix(s.URL, "github.com") {
@@ -266,7 +337,7 @@ func (gs *Spec) Merge(child interface{}) error {
 	if childGHSpec.Email != "" {
 		gs.Email = childGHSpec.Email
 	}
-	if childGHSpec.Force {
+	if childGHSpec.Force != nil {
 		gs.Force = childGHSpec.Force
 	}
 	if childGHSpec.GPG != (sign.GPGSpec{}) {
@@ -290,6 +361,9 @@ func (gs *Spec) Merge(child interface{}) error {
 	}
 	if childGHSpec.Username != "" {
 		gs.Username = childGHSpec.Username
+	}
+	if childGHSpec.Submodules != nil {
+		gs.Submodules = childGHSpec.Submodules
 	}
 
 	return nil
@@ -338,7 +412,7 @@ func (g *Github) setDirectory() {
 	}
 }
 
-func (g *Github) queryRepository() (*Repository, error) {
+func (g *Github) queryRepository(sourceBranch string, workingBranch string) (*Repository, error) {
 	/*
 			   query($owner: String!, $name: String!) {
 			       repository(owner: $owner, name: $name){
@@ -366,6 +440,13 @@ func (g *Github) queryRepository() (*Repository, error) {
 				Login string
 			}
 
+			Ref *struct {
+				Name    string
+				Compare struct {
+					Status string
+				} `graphql:"compare(headRef: $headRef)"`
+			} `graphql:"ref(qualifiedName: $qualifiedName)"`
+
 			Parent *struct {
 				ID    string
 				Name  string
@@ -377,14 +458,15 @@ func (g *Github) queryRepository() (*Repository, error) {
 	}
 
 	variables := map[string]interface{}{
-		"owner": githubv4.String(g.Spec.Owner),
-		"name":  githubv4.String(g.Spec.Repository),
+		"owner":         githubv4.String(g.Spec.Owner),
+		"name":          githubv4.String(g.Spec.Repository),
+		"qualifiedName": githubv4.String(sourceBranch),
+		"headRef":       githubv4.String(workingBranch),
 	}
 
 	err := g.client.Query(context.Background(), &query, variables)
 
 	if err != nil {
-		logrus.Errorf("err - %s", err)
 		return nil, err
 	}
 
@@ -397,6 +479,11 @@ func (g *Github) queryRepository() (*Repository, error) {
 		parentOwner = query.Repository.Parent.Owner.Login
 	}
 
+	status := ""
+	if query.Repository.Ref != nil {
+		status = query.Repository.Ref.Compare.Status
+	}
+
 	result := &Repository{
 		ID:          query.Repository.ID,
 		Name:        query.Repository.Name,
@@ -404,7 +491,82 @@ func (g *Github) queryRepository() (*Repository, error) {
 		ParentID:    parentID,
 		ParentName:  parentName,
 		ParentOwner: parentOwner,
+		Status:      status,
 	}
 
 	return result, nil
+}
+
+// Returns Git object ID of the latest commit on the branch and the default branch
+// of the repository.
+func (g *Github) queryHeadOid(workingBranch string) (*RepositoryRef, error) {
+	var query struct {
+		Repository struct {
+			ID    string
+			Name  string
+			Owner struct {
+				Login string
+			}
+
+			DefaultBranchRef *struct {
+				Name   string
+				Target struct {
+					Oid string
+				}
+			}
+
+			Ref *struct {
+				Name   string
+				Target struct {
+					Oid string
+				}
+			} `graphql:"ref(qualifiedName: $qualifiedName)"`
+		} `graphql:"repository(owner: $owner, name: $name)"`
+	}
+
+	variables := map[string]interface{}{
+		"owner":         githubv4.String(g.Spec.Owner),
+		"name":          githubv4.String(g.Spec.Repository),
+		"qualifiedName": githubv4.String(workingBranch),
+	}
+
+	err := g.client.Query(context.Background(), &query, variables)
+	if err != nil {
+		logrus.Errorf("err - %s", err)
+		return nil, err
+	}
+
+	headOid := ""
+	if query.Repository.Ref != nil {
+		headOid = query.Repository.Ref.Target.Oid
+	}
+
+	return &RepositoryRef{
+		ID:               query.Repository.ID,
+		HeadOid:          headOid,
+		DefaultBranchOid: query.Repository.DefaultBranchRef.Target.Oid,
+	}, nil
+}
+
+type refQuery struct {
+	CreateRef struct {
+		Ref struct {
+			Name string
+		}
+	} `graphql:"createRef(input:$input)"`
+}
+
+func (g *Github) createBranch(branchName string, repositoryId string, headOid string) error {
+	var query refQuery
+
+	input := githubv4.CreateRefInput{
+		RepositoryID: repositoryId,
+		Name:         githubv4.String(fmt.Sprintf("refs/heads/%s", branchName)),
+		Oid:          githubv4.GitObjectID(headOid),
+	}
+
+	if err := g.client.Mutate(context.Background(), &query, input, nil); err != nil {
+		return err
+	}
+	return nil
 }

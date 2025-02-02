@@ -35,16 +35,36 @@ import (
 	"github.com/updatecli/updatecli/pkg/plugins/resources/shell"
 	stashBranch "github.com/updatecli/updatecli/pkg/plugins/resources/stash/branch"
 	stashTag "github.com/updatecli/updatecli/pkg/plugins/resources/stash/tag"
+	"github.com/updatecli/updatecli/pkg/plugins/resources/temurin"
 	terraformLock "github.com/updatecli/updatecli/pkg/plugins/resources/terraform/lock"
 	terraformProvider "github.com/updatecli/updatecli/pkg/plugins/resources/terraform/provider"
 	terraformRegistry "github.com/updatecli/updatecli/pkg/plugins/resources/terraform/registry"
 	"github.com/updatecli/updatecli/pkg/plugins/resources/toml"
+	"github.com/updatecli/updatecli/pkg/plugins/resources/toolversions"
+	updateclihttp "github.com/updatecli/updatecli/pkg/plugins/resources/updateclihttp"
 	"github.com/updatecli/updatecli/pkg/plugins/resources/xml"
 	"github.com/updatecli/updatecli/pkg/plugins/resources/yaml"
 )
 
 type ResourceConfig struct {
-	// dependson specifies which resources must be executed before the current one
+	// "dependson" allows to specify the order of execution of resources
+	// It accepts a list of rules like "(resourceType#)resourceId(:booleanOperator)"
+	//
+	// The resourceType is optional and can be one of "condition", "source" or "target"
+	// By default the resourceType is the current resource type
+	//
+	// The resourceId is the name of the resource to depend on
+	//
+	// The booleanOperator is optional and can be "AND" or "OR"
+	//
+	// examples:
+	// dependson:
+	//   - condition#myCondition:and
+	//   - source#mySource
+	//
+	// remarks:
+	//   The parameters "sourceid" and "conditionsids" affect the order of resource execution.
+	//   To avoid circular dependencies, the depended resource may need to remove any conditionids or set "disablesourceinput to true".
 	DependsOn []string `yaml:",omitempty"`
 	// name specifies the resource name
 	Name string `yaml:",omitempty"`
@@ -155,6 +175,10 @@ func New(rs ResourceConfig) (resource Resource, err error) {
 
 		return helm.New(rs.Spec)
 
+	case "http":
+
+		return updateclihttp.New(rs.Spec)
+
 	case "jenkins":
 
 		return jenkins.New(rs.Spec)
@@ -166,6 +190,10 @@ func New(rs ResourceConfig) (resource Resource, err error) {
 	case "maven":
 
 		return maven.New(rs.Spec)
+
+	case "npm":
+
+		return npm.New(rs.Spec)
 
 	case "shell":
 
@@ -183,6 +211,10 @@ func New(rs ResourceConfig) (resource Resource, err error) {
 
 		return hcl.New(rs.Spec)
 
+	case "temurin":
+
+		return temurin.New(rs.Spec)
+
 	case "terraform/lock":
 
 		return terraformLock.New(rs.Spec)
@@ -199,17 +231,17 @@ func New(rs ResourceConfig) (resource Resource, err error) {
 
 		return toml.New(rs.Spec)
 
-	case "yaml":
+	case "toolversions":
 
-		return yaml.New(rs.Spec)
+		return toolversions.New(rs.Spec)
 
 	case "xml":
 
 		return xml.New(rs.Spec)
 
-	case "npm":
+	case "yaml":
 
-		return npm.New(rs.Spec)
+		return yaml.New(rs.Spec)
 
 	default:
 
@@ -220,7 +252,7 @@ func New(rs ResourceConfig) (resource Resource, err error) {
 // Resource allow to manipulate a resource that can be a source, a condition or a target
 type Resource interface {
 	Source(workingDir string, sourceResult *result.Source) error
-	Condition(version string, scm scm.ScmHandler, resultCondition *result.Condition) error
+	Condition(version string, scm scm.ScmHandler) (pass bool, message string, err error)
 	Target(source string, scm scm.ScmHandler, dryRun bool, targetResult *result.Target) (err error)
 	Changelog() string
 }
@@ -249,6 +281,7 @@ func GetResourceMapping() map[string]interface{} {
 		"golang/module":      &gomodule.Spec{},
 		"hcl":                &hcl.Spec{},
 		"helmchart":          &helm.Spec{},
+		"http":               &updateclihttp.Spec{},
 		"jenkins":            &jenkins.Spec{},
 		"json":               &json.Spec{},
 		"maven":              &maven.Spec{},
@@ -256,11 +289,13 @@ func GetResourceMapping() map[string]interface{} {
 		"shell":              &shell.Spec{},
 		"stash/branch":       &stashBranch.Spec{},
 		"stash/tag":          &stashTag.Spec{},
+		"temurin":            &temurin.Spec{},
 		"terraform/file":     &hcl.Spec{},
 		"terraform/lock":     &terraformLock.Spec{},
 		"terraform/provider": &terraformProvider.Spec{},
 		"terraform/registry": &terraformRegistry.Spec{},
 		"toml":               &toml.Spec{},
+		"toolversions":       &toolversions.Spec{},
 		"xml":                &xml.Spec{},
 		"yaml":               &yaml.Spec{},
 	}

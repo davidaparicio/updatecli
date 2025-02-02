@@ -13,8 +13,8 @@ func (g *Gitea) GetBranches() (sourceBranch, workingBranch, targetBranch string)
 	workingBranch = g.Spec.Branch
 	targetBranch = g.Spec.Branch
 
-	if len(g.pipelineID) > 0 {
-		workingBranch = g.nativeGitHandler.SanitizeBranchName(fmt.Sprintf("updatecli_%v", g.pipelineID))
+	if len(g.pipelineID) > 0 && g.workingBranch {
+		workingBranch = g.nativeGitHandler.SanitizeBranchName(fmt.Sprintf("updatecli_%s_%s", targetBranch, g.pipelineID))
 	}
 
 	return sourceBranch, workingBranch, targetBranch
@@ -53,27 +53,12 @@ func (g *Gitea) Clone() (string, error) {
 		g.Spec.Username,
 		g.Spec.Token,
 		g.GetURL(),
-		g.GetDirectory())
+		g.GetDirectory(),
+		g.Spec.Submodules,
+	)
 
 	if err != nil {
 		logrus.Errorf("failed cloning Gitea repository %q", g.GetURL())
-		return "", err
-	}
-
-	sourceBranch, workingBranch, _ := g.GetBranches()
-
-	if len(workingBranch) > 0 && len(g.GetDirectory()) > 0 {
-		err = g.nativeGitHandler.Checkout(
-			g.Spec.Username,
-			g.Spec.Token,
-			sourceBranch,
-			workingBranch,
-			g.GetDirectory(),
-			true)
-	}
-
-	if err != nil {
-		logrus.Errorf("initial Gitea checkout failed for repository %q", g.GetURL())
 		return "", err
 	}
 
@@ -106,7 +91,7 @@ func (g *Gitea) Checkout() error {
 		sourceBranch,
 		workingBranch,
 		g.Spec.Directory,
-		false)
+		g.force)
 	if err != nil {
 		return err
 	}
@@ -137,20 +122,25 @@ func (g *Gitea) IsRemoteBranchUpToDate() (bool, error) {
 }
 
 // Push run `git push` to the corresponding Gitea remote branch if not already created.
-func (g *Gitea) Push() error {
+func (g *Gitea) Push() (bool, error) {
 
-	err := g.nativeGitHandler.Push(g.Spec.Username, g.Spec.Token, g.GetDirectory(), g.Spec.Force)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return g.nativeGitHandler.Push(
+		g.Spec.Username,
+		g.Spec.Token,
+		g.GetDirectory(),
+		g.force,
+	)
 }
 
 // PushTag push tags
 func (g *Gitea) PushTag(tag string) error {
 
-	err := g.nativeGitHandler.PushTag(tag, g.Spec.Username, g.Spec.Token, g.GetDirectory(), g.Spec.Force)
+	err := g.nativeGitHandler.PushTag(
+		tag,
+		g.Spec.Username,
+		g.Spec.Token,
+		g.GetDirectory(),
+		g.force)
 	if err != nil {
 		return err
 	}
@@ -166,7 +156,7 @@ func (g *Gitea) PushBranch(branch string) error {
 		g.Spec.Username,
 		g.Spec.Token,
 		g.GetDirectory(),
-		g.Spec.Force)
+		g.force)
 	if err != nil {
 		return err
 	}

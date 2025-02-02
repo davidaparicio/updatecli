@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/updatecli/updatecli/pkg/core/config"
 	"github.com/updatecli/updatecli/pkg/core/pipeline"
+	"github.com/updatecli/updatecli/pkg/core/reports"
+	"github.com/updatecli/updatecli/pkg/core/result"
 )
 
 // ReadConfigurations read every strategies configuration.
@@ -18,7 +21,8 @@ func (e *Engine) LoadConfigurations() error {
 	ErrNoManifestDetectedCounter := 0
 
 	for i := range e.Options.Manifests {
-		if e.Options.Manifests[i].IsZero() {
+		// If no manifest file is specified, we try to detect one
+		if len(e.Options.Manifests[i].Manifests) == 0 {
 			// Updatecli tries to load the file updatecli.yaml if no manifest was specified
 			// If updatecli.yaml doesn't exists then Updatecli parses the directory updatecli.d for any manifests.
 			// if there is no manifests in the directory updatecli.d then Updatecli returns no manifest files.
@@ -67,6 +71,12 @@ func (e *Engine) LoadConfigurations() error {
 			default:
 				err = fmt.Errorf("%q - %s", manifestFile, err)
 				errs = append(errs, err)
+				e.Reports = append(e.Reports,
+					reports.Report{
+						Result: result.FAILURE,
+						Err:    err.Error(),
+					},
+				)
 				continue
 			}
 
@@ -79,12 +89,18 @@ func (e *Engine) LoadConfigurations() error {
 					e.Options.Pipeline)
 
 				if err == nil {
-					e.Pipelines = append(e.Pipelines, newPipeline)
-					e.configurations = append(e.configurations, loadedConfiguration)
+					e.Pipelines = append(e.Pipelines, &newPipeline)
+					e.configurations = append(e.configurations, &loadedConfiguration)
 				} else {
 					// don't initially fail as init. of the pipeline still fails even with a successful validation
 					err := fmt.Errorf("%q - %s", manifestFile, err)
 					errs = append(errs, err)
+					e.Reports = append(e.Reports,
+						reports.Report{
+							Result: result.FAILURE,
+							Err:    err.Error(),
+						},
+					)
 				}
 			}
 		}
@@ -99,7 +115,7 @@ func (e *Engine) LoadConfigurations() error {
 		e := errors.New("failed loading pipeline(s)")
 
 		for _, err := range errs {
-			e = fmt.Errorf("%s\n\t* %s", e.Error(), err)
+			e = fmt.Errorf("%s\n\t* %s", e.Error(), strings.ReplaceAll(err.Error(), "\n", "\n\t\t* "))
 			if errors.Is(err, ErrNoManifestDetected) {
 				return err
 			}
@@ -108,5 +124,4 @@ func (e *Engine) LoadConfigurations() error {
 	}
 
 	return nil
-
 }

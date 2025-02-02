@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
+	"github.com/updatecli/updatecli/pkg/plugins/scms/git"
 	"github.com/updatecli/updatecli/pkg/plugins/utils/gitgeneric"
 	"github.com/updatecli/updatecli/pkg/plugins/utils/version"
 )
@@ -12,12 +13,67 @@ import (
 // Spec defines a specification for a "gitbranch" resource
 // parsed from an updatecli manifest file
 type Spec struct {
-	// [s][c][t] Path contains the git repository path
+	// path contains the git repository path
 	Path string `yaml:",omitempty"`
-	// [s] VersionFilter provides parameters to specify version pattern and its type like regex, semver, or just latest.
+	// VersionFilter provides parameters to specify version pattern and its type like regex, semver, or just latest.
+	//
+	//  compatible:
+	//    * source
+	//    * condition
+	//    * target
 	VersionFilter version.Filter `yaml:",omitempty"`
-	// [c][t] Specify branch name
+	// branch specifies the branch name
+	//
+	//  compatible:
+	//    * source
+	//    * condition
+	//    * target
 	Branch string `yaml:",omitempty"`
+	//	"url" specifies the git url to use for fetching Git Tags.
+	//
+	//	compatible:
+	//	  * source
+	//	  * condition
+	// 	  * target
+	//
+	//	example:
+	//	  * git@github.com:updatecli/updatecli.git
+	//	  * https://github.com/updatecli/updatecli.git
+	//
+	//	remarks:
+	//		when using the ssh protocol, the user must have the right to clone the repository
+	//		based on its local ssh configuration
+	SourceBranch string `yaml:",omitempty"`
+	// "sourcebranch" defines the branch name used as a source to create the new Git branch.
+	//
+	// compatible:
+	//  * target
+	//
+	// remark:
+	//  * sourcebranch is required when the scmid is not defined.
+	URL string `yaml:",omitempty" jsonschema:"required"`
+	//	"username" specifies the username when using the HTTP protocol
+	//
+	//	compatible
+	//	  * source
+	//	  * condition
+	// 	  * target
+	Username string `yaml:",omitempty"`
+	//	"password" specifies the password when using the HTTP protocol
+	//
+	//	compatible:
+	//	  * source
+	// 	  * condition
+	// 	  * target
+	Password string `yaml:",omitempty"`
+	//  "key" of the tag object to retrieve.
+	//
+	//  Accepted values: ['name','hash'].
+	//
+	//  Default: 'name'
+	//  Compatible:
+	//    * source
+	Key string `yaml:",omitempty"`
 }
 
 // GitBranch defines a resource of kind "gitbranch"
@@ -31,6 +87,8 @@ type GitBranch struct {
 	nativeGitHandler gitgeneric.GitHandler
 	// branch hold the branch used for condition and target
 	branch string
+	// directory defines the local path where the git repository is cloned.
+	directory string
 }
 
 // New returns a reference to a newly initialized GitBranch object from a Spec
@@ -41,6 +99,17 @@ func New(spec interface{}) (*GitBranch, error) {
 	err := mapstructure.Decode(spec, &newSpec)
 	if err != nil {
 		return nil, err
+	}
+
+	validationErrors := []string{}
+
+	if newSpec.Key != "" && newSpec.Key != "hash" && newSpec.Key != "name" {
+		validationErrors = append(validationErrors, "The only valid values for Key are 'name', 'hash', or empty.")
+	}
+
+	// Return all the validation errors if found any
+	if len(validationErrors) > 0 {
+		return &GitBranch{}, fmt.Errorf("validation error: the provided manifest configuration has the following validation errors:\n%s", strings.Join(validationErrors, "\n\n"))
 	}
 
 	newFilter, err := newSpec.VersionFilter.Init()
@@ -57,22 +126,21 @@ func New(spec interface{}) (*GitBranch, error) {
 	return newResource, nil
 }
 
-// Validate tests that tag struct is correctly configured
-func (gt *GitBranch) Validate() error {
-	validationErrors := []string{}
-	if gt.spec.Path == "" {
-		validationErrors = append(validationErrors, "Git working directory path is empty while it must be specified. Did you specify an `scmID` or a `spec.path`?")
-	}
-
-	// Return all the validation errors if found any
-	if len(validationErrors) > 0 {
-		return fmt.Errorf("validation error: the provided manifest configuration has the following validation errors:\n%s", strings.Join(validationErrors, "\n\n"))
-	}
-
-	return nil
+// Changelog returns the changelog for this resource, or an empty string if not supported
+func (gb *GitBranch) Changelog() string {
+	return ""
 }
 
-// Changelog returns the changelog for this resource, or an empty string if not supported
-func (gt *GitBranch) Changelog() string {
-	return ""
+// clone clones the git repository
+func (gb *GitBranch) clone() (string, error) {
+	g, err := git.New(git.Spec{
+		URL:      gb.spec.URL,
+		Username: gb.spec.Username,
+		Password: gb.spec.Password,
+	}, "")
+
+	if err != nil {
+		return "", err
+	}
+	return g.Clone()
 }

@@ -6,7 +6,8 @@ import (
 
 	"github.com/drone/go-scm/scm"
 	"github.com/drone/go-scm/scm/driver/gitlab"
-	"github.com/drone/go-scm/scm/transport/oauth2"
+	"github.com/drone/go-scm/scm/transport"
+	"github.com/updatecli/updatecli/pkg/core/httpclient"
 )
 
 const (
@@ -27,17 +28,15 @@ func New(s Spec) (Client, error) {
 		return nil, err
 	}
 
-	client.Client = &http.Client{}
+	client.Client = httpclient.NewRetryClient().(*http.Client)
 
 	if len(s.Token) >= 0 {
-		client.Client = &http.Client{
-			Transport: &oauth2.Transport{
-				Source: oauth2.StaticTokenSource(
-					&scm.Token{
-						Token: s.Token,
-					},
-				),
-			},
+		// provide a custom http.Client with a transport
+		// that injects the private GitLab token through
+		// the PRIVATE_TOKEN header variable.
+		client.Client.Transport = &transport.PrivateToken{
+			Token: s.Token,
+			Base:  client.Client.Transport,
 		}
 	}
 

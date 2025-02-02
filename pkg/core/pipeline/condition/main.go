@@ -49,18 +49,17 @@ func (c *Condition) Run(source string) (err error) {
 
 	var consoleOutput bytes.Buffer
 	// By default logrus logs to stderr, so I guess we want to keep this behavior...
-	logrus.SetOutput(io.MultiWriter(os.Stderr, &consoleOutput))
+	logrus.SetOutput(io.MultiWriter(os.Stdout, &consoleOutput))
 	/*
 		The last defer will be executed first,
 		so in this case we want to first save the console output
 		before setting back the logrus output to stdout.
 	*/
-	// By default logrus logs to stderr, so I guess we want to keep this behavior...
-	defer logrus.SetOutput(os.Stderr)
+	// By default logrus logs to stdout and we want to keep this behavior.
+	defer logrus.SetOutput(os.Stdout)
 	defer c.Result.SetConsoleOutput(&consoleOutput)
 
 	c.Result.Result = result.FAILURE
-	c.Result.Name = c.Config.ResourceConfig.Name
 
 	condition, err := resource.New(c.Config.ResourceConfig)
 	if err != nil {
@@ -74,15 +73,10 @@ func (c *Condition) Run(source string) (err error) {
 		}
 	}
 
-	switch c.Scm == nil {
-	case true:
-		err = condition.Condition(source, nil, &c.Result)
-		if err != nil {
-			return err
-		}
-	case false:
+	var s scm.ScmHandler
+	if c.Scm != nil {
 		// If scm is defined then clone the repository
-		s := *c.Scm
+		s = *c.Scm
 		if err != nil {
 			return err
 		}
@@ -94,11 +88,19 @@ func (c *Condition) Run(source string) (err error) {
 		if err != nil {
 			return err
 		}
+	}
 
-		err = condition.Condition(source, s, &c.Result)
-		if err != nil {
-			return err
-		}
+	ok, message, err := condition.Condition(source, s)
+	if ok {
+		c.Result.Result = result.SUCCESS
+		c.Result.Pass = true
+	} else {
+		c.Result.Result = result.FAILURE
+		c.Result.Pass = false
+	}
+	c.Result.Description = message
+	if err != nil {
+		return err
 	}
 
 	// FailWhen is used to reverse the expected condition value

@@ -3,6 +3,7 @@ package fleet
 import (
 	"bytes"
 	"fmt"
+	"path"
 	"path/filepath"
 	"text/template"
 
@@ -30,8 +31,15 @@ func (f Fleet) discoverFleetDependenciesManifests() ([][]byte, error) {
 
 	var manifests [][]byte
 
+	searchFromDir := f.rootDir
+	// If the spec.RootDir is an absolute path, then it as already been set
+	// correctly in the New function.
+	if f.spec.RootDir != "" && !path.IsAbs(f.spec.RootDir) {
+		searchFromDir = filepath.Join(f.rootDir, f.spec.RootDir)
+	}
+
 	foundFleetBundleFiles, err := searchFleetBundleFiles(
-		f.rootDir,
+		searchFromDir,
 		FleetBundleFiles[:])
 
 	if err != nil {
@@ -51,22 +59,6 @@ func (f Fleet) discoverFleetDependenciesManifests() ([][]byte, error) {
 		chartRelativeMetadataPath := filepath.Dir(relativeFoundChartFile)
 		chartName := filepath.Base(chartRelativeMetadataPath)
 
-		// Test if the ignore rule based on path is respected
-		if len(f.spec.Ignore) > 0 && f.spec.Ignore.isMatchingIgnoreRule(f.rootDir, relativeFoundChartFile) {
-			logrus.Debugf("Ignoring Helm Chart %q from %q, as not matching rule(s)\n",
-				chartName,
-				chartRelativeMetadataPath)
-			continue
-		}
-
-		// Test if the only rule based on path is respected
-		if len(f.spec.Only) > 0 && !f.spec.Only.isMatchingOnlyRule(f.rootDir, relativeFoundChartFile) {
-			logrus.Debugf("Ignoring Helm Chart %q from %q, as not matching rule(s)\n",
-				chartName,
-				chartRelativeMetadataPath)
-			continue
-		}
-
 		// Retrieve chart dependencies for each chart
 
 		data, err := getFleetBundleData(foundFleetBundleFile)
@@ -82,6 +74,20 @@ func (f Fleet) discoverFleetDependenciesManifests() ([][]byte, error) {
 		// Skip pipeline if at least of the helm chart or helm repository is not specified
 		if len(data.Helm.Chart) == 0 || len(data.Helm.Repo) == 0 {
 			continue
+		}
+
+		if len(f.spec.Ignore) > 0 {
+			if f.spec.Ignore.isMatchingRules(f.rootDir, relativeFoundChartFile, data.Helm.Repo, data.Helm.Chart, data.Helm.Version) {
+				logrus.Debugf("Ignoring Helm chart %q from %q, as matching ignore rule(s)\n", data.Helm.Chart, relativeFoundChartFile)
+				continue
+			}
+		}
+
+		if len(f.spec.Only) > 0 {
+			if !f.spec.Only.isMatchingRules(f.rootDir, relativeFoundChartFile, data.Helm.Repo, data.Helm.Chart, data.Helm.Version) {
+				logrus.Debugf("Ignoring Helm chart %q from %q, as not matching only rule(s)\n", data.Helm.Chart, relativeFoundChartFile)
+				continue
+			}
 		}
 
 		sourceVersionFilterKind := "semver"
@@ -118,7 +124,7 @@ func (f Fleet) discoverFleetDependenciesManifests() ([][]byte, error) {
 			File                       string
 			ScmID                      string
 		}{
-			ManifestName:               fmt.Sprintf("Bump %q Fleet bundle for %q Helm chart", chartName, data.Helm.Chart),
+			ManifestName:               fmt.Sprintf("deps(rancher/fleet): bump %q Fleet bundle for %q Helm chart", chartName, data.Helm.Chart),
 			ChartName:                  data.Helm.Chart,
 			ChartRepository:            data.Helm.Repo,
 			ConditionID:                data.Helm.Chart,

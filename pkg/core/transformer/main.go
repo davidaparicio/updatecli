@@ -118,17 +118,20 @@ func (t *Transformers) Apply(input string) (string, error) {
 	output := input
 
 	err := t.Validate()
-
 	if err != nil {
 		return "", err
 	}
 
-	for _, transformer := range *t {
-		output, err = transformer.Apply(output)
+	logrus.Info("[transformers]\n")
 
+	for _, transformer := range *t {
+		previous := output
+		output, err = transformer.Apply(output)
 		if err != nil {
 			return "", err
 		}
+
+		logrus.Infof("✔ Result correctly transformed from %q to %q", previous, output)
 	}
 	return output, nil
 }
@@ -142,7 +145,7 @@ func applySemVerInc(input, semVerInc string) (string, error) {
 
 	v, err := semver.NewVersion(input)
 	if err != nil {
-		return "", fmt.Errorf("wrong semantic version input: %q", semVerInc)
+		return "", fmt.Errorf("wrong semantic version input: %q", input)
 	}
 
 	rules := strings.Split(semVerInc, ",")

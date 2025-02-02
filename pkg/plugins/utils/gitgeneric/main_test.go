@@ -121,7 +121,8 @@ func TestSanitizeBranchName(t *testing.T) {
 func TestTagsIntegration(t *testing.T) {
 	g := GoGit{}
 	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli")
-	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir)
+	withSubmodules := true
+	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir, &withSubmodules)
 	if err != nil {
 		t.Errorf("Don't expect error: %q", err)
 	}
@@ -151,7 +152,8 @@ func TestTagsIntegration(t *testing.T) {
 func TestTagRefsIntegration(t *testing.T) {
 	g := GoGit{}
 	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli")
-	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir)
+	withSubmodules := true
+	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir, &withSubmodules)
 	if err != nil {
 		t.Errorf("Don't expect error: %q", err)
 	}
@@ -185,7 +187,8 @@ func TestTagRefsIntegration(t *testing.T) {
 func TestHashesIntegration(t *testing.T) {
 	g := GoGit{}
 	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli")
-	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir)
+	withSubmodules := true
+	err := g.Clone("", "", "https://github.com/updatecli/updatecli.git", workingDir, &withSubmodules)
 	if err != nil {
 		t.Errorf("Don't expect error: %q", err)
 	}
@@ -209,6 +212,7 @@ func TestHashesIntegration(t *testing.T) {
 	}
 	os.Remove(workingDir)
 }
+
 func TestGoGit_RemoteURLs(t *testing.T) {
 	cwd, _ := os.Getwd()
 
@@ -247,6 +251,98 @@ func TestGoGit_RemoteURLs(t *testing.T) {
 			// Because origin's URL, as well as other remotes, depends on the user or CI configuration and is not deterministic.
 			assert.Contains(t, gotRemotes, "origin")
 			assert.NotEmpty(t, gotRemotes["origin"])
+		})
+	}
+}
+
+// Test that we can correctly retrieve submodule content from a remote git repository
+func TestSubmodulesEnabledContent(t *testing.T) {
+	g := GoGit{}
+	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli-submodules")
+	withSubmodules := true
+	err := g.Clone("", "", "https://github.com/updatecli-test/updatecli-submodules.git", workingDir, &withSubmodules)
+	if err != nil {
+		t.Errorf("Don't expect error: %q", err)
+	}
+	defer os.RemoveAll(workingDir)
+
+	checkFiles := []string{
+		"nocode/README.md",
+		"cargo-lab/Cargo.toml",
+	}
+
+	for _, file := range checkFiles {
+		assert.FileExists(t, filepath.Join(workingDir, file))
+	}
+
+	os.Remove(workingDir)
+}
+
+// Test that we can correctly retrieve submodule content from a remote git repository
+func TestSubmodulesDisabledContent(t *testing.T) {
+	g := GoGit{}
+	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli-submodules")
+	withSubmodules := false
+	err := g.Clone("", "", "https://github.com/updatecli-test/updatecli-submodules.git", workingDir, &withSubmodules)
+	if err != nil {
+		t.Errorf("Don't expect error: %q", err)
+	}
+	defer os.RemoveAll(workingDir)
+
+	checkFiles := []string{
+		"nocode/README.md",
+		"cargo-lab/Cargo.toml",
+	}
+
+	for _, file := range checkFiles {
+		assert.NoFileExists(t, filepath.Join(workingDir, file))
+	}
+
+	os.Remove(workingDir)
+}
+
+func TestLatestCommitHash(t *testing.T) {
+	g := GoGit{}
+	workingDir := filepath.Join(os.TempDir(), "tests", "updatecli-submodules")
+	withSubmodules := false
+
+	tests := []struct {
+		name       string
+		cloneUrl   string
+		workingDir string
+		wantErr    bool
+	}{
+		{
+			name:       "passing test with cloned repository",
+			workingDir: workingDir,
+			cloneUrl:   "https://github.com/updatecli-test/updatecli-submodules.git",
+			wantErr:    false,
+		},
+		{
+			name:       "failing test with existing directory with no git in it",
+			workingDir: "/nonexistent/tmp/dir",
+			cloneUrl:   "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer os.RemoveAll(workingDir)
+			if tt.cloneUrl != "" {
+				err := g.Clone("", "", tt.cloneUrl, tt.workingDir, &withSubmodules)
+				if err != nil {
+					t.Errorf("unexpected error: %q", err)
+				}
+			}
+			hash, err := g.GetLatestCommitHash(workingDir)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Len(t, hash, 40)
 		})
 	}
 }

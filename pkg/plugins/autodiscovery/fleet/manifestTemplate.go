@@ -10,7 +10,7 @@ sources:
     spec:
       name: '{{ .ChartName }}'
       url: '{{ .ChartRepository }}'
-      versionFilter:
+      versionfilter:
         kind: '{{ .SourceVersionFilterKind }}'
         pattern: '{{ .SourceVersionFilterPattern }}'
 conditions:
@@ -38,7 +38,7 @@ conditions:
       value: '{{ .ChartRepository }}'
 targets:
   {{ .TargetID }}:
-    name: 'Bump chart {{ .ChartName }} from Fleet bundle {{ .FleetBundle }}'
+    name: 'deps(helm): bump chart "{{ .ChartName }}" in Fleet bundle "{{ .FleetBundle }}"'
     kind: 'yaml'
 {{- if .ScmID }}
     scmid: {{ .ScmID }}

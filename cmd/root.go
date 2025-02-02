@@ -10,6 +10,7 @@ import (
 	"github.com/updatecli/updatecli/pkg/core/log"
 	"github.com/updatecli/updatecli/pkg/core/registry"
 	"github.com/updatecli/updatecli/pkg/core/udash"
+	"github.com/updatecli/updatecli/pkg/plugins/utils/ci"
 
 	"github.com/updatecli/updatecli/pkg/core/engine"
 	"github.com/updatecli/updatecli/pkg/core/result"
@@ -53,11 +54,20 @@ func Execute() {
 }
 
 func init() {
+
+	logrus.SetOutput(os.Stdout)
+
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "debug", "", false, "Debug Output")
 	rootCmd.PersistentFlags().BoolVarP(&experimental, "experimental", "", false, "Enable Experimental mode")
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if verbose {
 			logrus.SetLevel(logrus.DebugLevel)
+		} else {
+			detectedCi, err := ci.New()
+			if err == nil && detectedCi.IsDebug() {
+				logrus.Infof("CI pipeline detected in Debug Mode - hence enabling debug mode")
+				logrus.SetLevel(logrus.DebugLevel)
+			}
 		}
 		if experimental {
 			cmdoptions.Experimental = true
@@ -139,6 +149,13 @@ func run(command string) error {
 			logrus.Errorf("%s %s", result.FAILURE, err)
 		}
 
+	case "manifest/init":
+
+		err := e.Scaffold(manifestInitPolicyRootDir)
+		if err != nil {
+			logrus.Errorf("%s %s", result.FAILURE, err)
+		}
+
 	case "manifest/upgrade":
 		err := e.ManifestUpgrade(manifestUpgradeInPlace)
 		if err != nil {
@@ -154,7 +171,16 @@ func run(command string) error {
 		}
 
 	case "manifest/push":
-		err := e.PushToRegistry(manifestFiles, valuesFiles, secretsFiles, manifestPushPolicyReference, disableTLS, manifestPushPolicyFile, manifestPushFileStore)
+		err := e.PushToRegistry(
+			manifestFiles,
+			valuesFiles,
+			secretsFiles,
+			manifestPushPolicyReference,
+			disableTLS,
+			manifestPushPolicyFile,
+			manifestPushFileStore,
+			manifestPushOverwrite)
+
 		if err != nil {
 			logrus.Errorf("%s %s", result.FAILURE, err)
 			return err
@@ -194,7 +220,7 @@ func run(command string) error {
 		logrus.Infof("Config file located at %q", configFilePath)
 
 	case "udash/login":
-		err := udash.Login(udashEndpointURL, udashOAuthClientID, udashOAuthIssuer, udashOAuthAudience, udashOAuthAccessToken)
+		err := udash.Login(udashEndpointURL, udashEndpointAPIURL, udashOAuthClientID, udashOAuthIssuer, udashOAuthAudience, udashOAuthAccessToken)
 		if err != nil {
 			logrus.Errorf("%s %s", result.FAILURE, err)
 			return err
@@ -223,12 +249,6 @@ func getPolicyFilesFromRegistry() error {
 
 	if slices.Equal(policyReferences, []string{""}) || slices.Equal(policyReferences, []string{}) {
 		return nil
-	}
-
-	// TODO: To be removed once not experimental anymore
-	if !experimental {
-		logrus.Warningf("The 'oci registry' feature requires the flag --experimental to be set")
-		os.Exit(1)
 	}
 
 	for _, policy := range policyReferences {

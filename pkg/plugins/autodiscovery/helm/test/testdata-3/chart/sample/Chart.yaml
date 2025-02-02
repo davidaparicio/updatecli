@@ -1,5 +1,0 @@
-apiVersion: v2
-description: A test chart for updatecli
-name: test3
-version: 1.0.0
-

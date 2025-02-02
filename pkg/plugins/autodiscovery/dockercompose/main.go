@@ -1,6 +1,7 @@
 package dockercompose
 
 import (
+	"path"
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
@@ -13,45 +14,52 @@ import (
 // For Fields that requires it, we can use the struct DockerCompose
 // Spec defines the parameters which can be provided to the Helm builder.
 type Spec struct {
-	// RootDir defines the root directory used to recursively search for Helm Chart
+	// digest provides parameters to specify if the generated manifest should use a digest on top of the tag.
+	Digest *bool `yaml:",omitempty"`
+	// rootDir defines the root directory used to recursively search for Helm Chart
+	// If rootDir is not provided, the current working directory will be used.
+	// If rootDir is provided as an absolute path, scmID will be ignored.
+	// If rootDir is not provided but a scmid is, then rootDir will be set to the git repository root directory.
 	RootDir string `yaml:",omitempty"`
-	// Ignore allows to specify rule to ignore autodiscovery a specific Helm based on a rule
+	// ignore allows to specify rule to ignore autodiscovery a specific Helm based on a rule
 	Ignore MatchingRules `yaml:",omitempty"`
-	// Only allows to specify rule to only autodiscover manifest for a specific Helm based on a rule
+	// only allows to specify rule to only autodiscover manifest for a specific Helm based on a rule
 	Only MatchingRules `yaml:",omitempty"`
-	// Auths provides a map of registry credentials where the key is the registry URL without scheme
+	// auths provides a map of registry credentials where the key is the registry URL without scheme
 	Auths map[string]docker.InlineKeyChain `yaml:",omitempty"`
 	// FileMatch allows to override default docker-compose.yaml file matching. Default ["docker-compose.yaml","docker-compose.yml","docker-compose.*.yaml","docker-compose.*.yml"]
 	FileMatch []string `yaml:",omitempty"`
-	/*
-		versionfilter provides parameters to specify the version pattern used when generating manifest.
-
-		kind - semver
-			versionfilter of kind `semver` uses semantic versioning as version filtering
-			pattern accepts one of:
-				`patch` - patch only update patch version
-				`minor` - minor only update minor version
-				`major` - major only update major versions
-				`a version constraint` such as `>= 1.0.0`
-
-		kind - regex
-			versionfilter of kind `regex` uses regular expression as version filtering
-			pattern accepts a valid regular expression
-
-		example:
-		```
-			versionfilter:
-				kind: semver
-				pattern: minor
-		```
-
-		and its type like regex, semver, or just latest.
-	*/
+	// versionfilter provides parameters to specify the version pattern used when generating manifest.
+	//
+	// More information available at
+	// https://www.updatecli.io/docs/core/versionfilter/
+	//
+	// kind - semver
+	//   versionfilter of kind `semver` uses semantic versioning as version filtering
+	//   pattern accepts one of:
+	//     `patch` - patch only update patch version
+	//     `minor` - minor only update minor version
+	//     `major` - major only update major versions
+	//     `a version constraint` such as `>= 1.0.0`
+	//
+	// kind - regex
+	// versionfilter of kind `regex` uses regular expression as version filtering
+	// pattern accepts a valid regular expression
+	//
+	// example:
+	// ```
+	//   versionfilter:
+	//   kind: semver
+	//   pattern: minor
+	//```
+	//and its type like regex, semver, or just latest.
 	VersionFilter version.Filter `yaml:",omitempty"`
 }
 
 // DockerCompose hold all information needed to generate compose file manifest.
 type DockerCompose struct {
+	// digest holds the value of the digest parameter
+	digest bool
 	// spec defines the settings provided via an updatecli manifest
 	spec Spec
 	// rootDir defines the root directory from where looking for Helm Chart
@@ -74,7 +82,10 @@ func New(spec interface{}, rootDir, scmID string) (DockerCompose, error) {
 	}
 
 	dir := rootDir
-	if len(s.RootDir) > 0 {
+	if path.IsAbs(s.RootDir) {
+		if scmID != "" {
+			logrus.Warningf("rootdir %q is an absolute path, scmID %q will be ignored", s.RootDir, scmID)
+		}
 		dir = s.RootDir
 	}
 
@@ -92,7 +103,13 @@ func New(spec interface{}, rootDir, scmID string) (DockerCompose, error) {
 		newFilter.Pattern = "*"
 	}
 
+	digest := true
+	if s.Digest != nil {
+		digest = *s.Digest
+	}
+
 	d := DockerCompose{
+		digest:        digest,
 		spec:          s,
 		rootDir:       dir,
 		filematch:     []string{DefaultFilePattern},

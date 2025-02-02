@@ -1,6 +1,7 @@
 package maven
 
 import (
+	"path"
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
@@ -65,7 +66,10 @@ func New(spec interface{}, rootDir, scmID string) (Maven, error) {
 	}
 
 	dir := rootDir
-	if len(s.RootDir) > 0 {
+	if path.IsAbs(s.RootDir) {
+		if scmID != "" {
+			logrus.Warningf("rootdir %q is an absolute path, scmID %q will be ignored", s.RootDir, scmID)
+		}
 		dir = s.RootDir
 	}
 
@@ -76,7 +80,6 @@ func New(spec interface{}, rootDir, scmID string) (Maven, error) {
 
 	newFilter := s.VersionFilter
 	if s.VersionFilter.IsZero() {
-		// By default, NPM versioning uses semantic versioning
 		newFilter.Kind = "latest"
 		newFilter.Pattern = "latest"
 	}
@@ -95,13 +98,13 @@ func (m Maven) DiscoverManifests() ([][]byte, error) {
 	logrus.Infof("\n\n%s\n", strings.ToTitle("Maven"))
 	logrus.Infof("%s\n", strings.Repeat("=", len("Maven")+1))
 
-	manifests, err := m.discoverDependenciesManifests()
+	manifests, err := m.discoverDependencyManifests("dependency")
 
 	if err != nil {
 		return nil, err
 	}
 
-	dependencyManagementManifests, err := m.discoverDependencyManagementsManifests()
+	dependencyManagementManifests, err := m.discoverDependencyManifests("dependencyManagement")
 
 	if err != nil {
 		return nil, err

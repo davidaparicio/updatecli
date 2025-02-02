@@ -80,6 +80,7 @@ Deepmerge
 DEFAULTCOMMENT
 DEFAULTSEPARATOR
 dependson
+dependsonchange
 depguard
 deprecatedscm
 devroom
@@ -357,6 +358,7 @@ Successer
 Suse
 sut
 Svqx
+swp
 syft
 systemerr
 systemout
